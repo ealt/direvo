@@ -57,28 +57,22 @@ def doctor(config_path: Path) -> int:
     if not GitManager(config.workspace_root).is_git_repo():
         raise RuntimeError(f"Workspace is not a git repo: {config.workspace_root}")
 
-    execution_binary = shlex.split(config.execution_command)[0]
+    execute_binary = shlex.split(config.execute_command)[0]
+    evaluate_binary = shlex.split(config.evaluate_command)[0]
     checks = {
         "git": _resolve_executable("git"),
-        "execution_command": _resolve_executable(execution_binary),
+        "execute_command": _resolve_executable(execute_binary),
+        "evaluate_command": _resolve_executable(evaluate_binary),
     }
-    if config.planner_command is not None:
-        planner_binary = shlex.split(config.planner_command)[0]
-        checks["planner_command"] = _resolve_executable(planner_binary)
+    if config.plan_command is not None:
+        plan_binary = shlex.split(config.plan_command)[0]
+        checks["plan_command"] = _resolve_executable(plan_binary)
     missing = [name for name, resolved in checks.items() if resolved is None]
     if missing:
         raise RuntimeError(f"Missing required executables: {', '.join(missing)}")
 
     with sqlite3.connect(":memory:") as connection:
         connection.execute("select sqlite_version()")
-
-    if not config.eval_script.exists():
-        raise RuntimeError(f"Evaluation script does not exist: {config.eval_script}")
-    if not config.eval_script.is_file():
-        raise RuntimeError(f"Evaluation script is not a file: {config.eval_script}")
-    mode = config.eval_script.stat().st_mode
-    if mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH) == 0:
-        raise RuntimeError(f"Evaluation script is not executable: {config.eval_script}")
 
     writable_paths = [
         config.results_db.parent,

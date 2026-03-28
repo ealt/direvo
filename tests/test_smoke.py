@@ -54,8 +54,8 @@ def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
         textwrap.dedent(
             f"""
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
-            execution_command: "sh {fake_claude} {{direction}}"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "sh {fake_claude}"
             max_trials: 5
             max_wall_time: "1h"
             objective:

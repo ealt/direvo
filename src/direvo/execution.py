@@ -81,22 +81,23 @@ class ExecutionManager:
         self,
         runner: CommandRunner | None = None,
         *,
-        execution_command: str = "claude -p {direction}",
+        execute_command: str = "echo {slug}",
     ) -> None:
         self.runner = runner or CommandRunner()
-        self.execution_command = execution_command
+        self.execute_command = execute_command
 
     def run_execution(
         self,
         *,
         worktree_path: Path,
         slot: int,
-        direction: str,
         timeout_sec: int,
         user: str | None = None,
+        slug: str = "",
+        trial_id: int = 0,
     ) -> ExecutionResult:
         """Run the execution agent."""
-        command = self._render_execution_command(direction)
+        command = self._render_execute_command(slug=slug, trial_id=trial_id)
         try:
             completed = self._run_as_user(command, cwd=worktree_path, timeout_sec=timeout_sec, user=user)
         except CommandTimeoutError:
@@ -119,13 +120,14 @@ class ExecutionManager:
         self,
         *,
         worktree_path: Path,
-        eval_script: Path,
+        evaluate_command: str,
         timeout_sec: int,
         user: str | None = None,
     ) -> EvaluationResult:
-        """Run the configured evaluation script and parse JSON metrics."""
+        """Run the configured evaluation command and parse JSON metrics."""
+        command = shlex.split(evaluate_command)
         try:
-            completed = self._run_as_user([str(eval_script)], cwd=worktree_path, timeout_sec=timeout_sec, user=user)
+            completed = self._run_as_user(command, cwd=worktree_path, timeout_sec=timeout_sec, user=user)
         except CommandTimeoutError:
             return EvaluationResult(
                 success=False,
@@ -191,14 +193,13 @@ class ExecutionManager:
             )
         return self.runner.run(command, cwd=cwd, timeout_sec=timeout_sec)
 
-    def _render_execution_command(self, direction: str) -> list[str]:
-        """Render the configured execution command with a single prompt argument."""
+    def _render_execute_command(self, **kwargs: object) -> list[str]:
+        """Render the configured execute command with optional template variables."""
         rendered: list[str] = []
-        for token in shlex.split(self.execution_command):
-            if token == "{direction}":
-                rendered.append(direction)
-            else:
-                rendered.append(token.replace("{direction}", direction))
+        for token in shlex.split(self.execute_command):
+            for key, value in kwargs.items():
+                token = token.replace(f"{{{key}}}", str(value))
+            rendered.append(token)
         return rendered
 
 

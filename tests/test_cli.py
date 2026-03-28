@@ -33,7 +33,8 @@ def _write_config(workspace: Path) -> Path:
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -64,5 +65,5 @@ def test_doctor_rejects_non_executable_eval_script(
     (workspace / "evaluate.sh").chmod(0o644)
     monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
 
-    with pytest.raises(RuntimeError, match="not executable"):
+    with pytest.raises(RuntimeError, match="Missing required executables"):
         doctor(config_path)

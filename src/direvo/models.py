@@ -45,9 +45,10 @@ class SessionConfig:
     """Fully validated session config."""
 
     config_path: Path
+    experiment_root: Path
     workspace_root: Path
     parallel_trials: int
-    eval_script: Path
+    evaluate_command: str
     max_trials: int
     max_wall_time_seconds: int
     metrics_schema: dict[str, str]
@@ -58,10 +59,10 @@ class SessionConfig:
     proposals_db: Path
     proposals_dir: Path
     artifacts_dir: Path
-    execution_command: str
-    planner_command: str | None
-    planner_notify_template: str
-    planner_start_timeout_sec: int
+    execute_command: str
+    plan_command: str | None
+    plan_notify_template: str
+    plan_start_timeout_sec: int
     execution_timeout_sec: int
     evaluation_timeout_sec: int
     sqlite_busy_timeout_ms: int

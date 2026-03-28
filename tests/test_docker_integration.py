@@ -57,8 +57,8 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
-            execution_command: "sh /workspace/fake-execution.sh {direction}"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "sh /workspace/fake-execution.sh"
             max_trials: 1
             max_wall_time: "1h"
             objective:

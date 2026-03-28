@@ -34,6 +34,7 @@ This document defines the code formatting and style conventions for direvo.
 - Constants: `UPPER_SNAKE_CASE`
 - Classes: `PascalCase`
 - Boolean variables: prefix with `is`, `has`, `should`, `can`
+- Related config/API fields that serve parallel roles should use consistent grammatical form (e.g., all imperative verbs: `evaluate_command`, `execute_command`, `plan_command` — not a mix of verb/noun/subject)
 
 ### Type Annotations
 

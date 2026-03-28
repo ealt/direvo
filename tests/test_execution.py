@@ -44,7 +44,6 @@ def test_execution_timeout_returns_explicit_reason(tmp_path: Path) -> None:
     result = manager.run_execution(
         worktree_path=tmp_path,
         slot=0,
-        direction="Do the thing",
         timeout_sec=30,
     )
 
@@ -65,7 +64,7 @@ def test_evaluation_invalid_json_sets_reason(tmp_path: Path) -> None:
 
     result = manager.run_evaluation(
         worktree_path=tmp_path,
-        eval_script=tmp_path / "evaluate.sh",
+        evaluate_command="python3 eval.py",
         timeout_sec=30,
     )
 
@@ -75,7 +74,7 @@ def test_evaluation_invalid_json_sets_reason(tmp_path: Path) -> None:
     assert result.metrics == {}
 
 
-def test_execution_command_preserves_direction_as_single_argument(tmp_path: Path) -> None:
+def test_execute_command_renders_template_variables(tmp_path: Path) -> None:
     manager = ExecutionManager(
         runner=StaticRunner(
             subprocess.CompletedProcess(
@@ -85,12 +84,12 @@ def test_execution_command_preserves_direction_as_single_argument(tmp_path: Path
                 stderr="",
             )
         ),
-        execution_command="claude -p {direction}",
+        execute_command="claude -p {slug}",
     )
 
-    command = manager._render_execution_command("Investigate the failing tests")
+    command = manager._render_execute_command(slug="investigate-failing-tests")
 
-    assert command == ["claude", "-p", "Investigate the failing tests"]
+    assert command == ["claude", "-p", "investigate-failing-tests"]
 
 
 def test_evaluation_falls_back_to_sh_for_shell_scripts(tmp_path: Path) -> None:
@@ -101,7 +100,7 @@ def test_evaluation_falls_back_to_sh_for_shell_scripts(tmp_path: Path) -> None:
 
     result = manager.run_evaluation(
         worktree_path=tmp_path,
-        eval_script=eval_script,
+        evaluate_command=str(eval_script),
         timeout_sec=30,
     )
 
@@ -119,7 +118,7 @@ def test_run_as_user_falls_back_to_direct_command_when_user_missing(
         stderr="",
     )
     runner = StaticRunner(completed)
-    manager = ExecutionManager(runner=runner, execution_command="claude -p {direction}")
+    manager = ExecutionManager(runner=runner, execute_command="claude -p {slug}")
 
     monkeypatch.setattr("os.geteuid", lambda: 0)
     monkeypatch.setattr("pwd.getpwnam", lambda user: (_ for _ in ()).throw(KeyError(user)))
@@ -127,7 +126,7 @@ def test_run_as_user_falls_back_to_direct_command_when_user_missing(
     assert manager.run_execution(
         worktree_path=tmp_path,
         slot=0,
-        direction="Investigate",
+        slug="investigate",
         timeout_sec=30,
         user="trial-0",
     ) == ExecutionResult(

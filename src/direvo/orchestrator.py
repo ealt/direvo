@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import signal
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 from .config import load_config
 from .db import DatabaseManager
@@ -30,7 +30,6 @@ from .models import (
 from .planner import PlannerSession, create_planner_session
 from .termination import should_terminate
 from .worktree import (
-    chown_recursive,
     clean_trial_docs,
     copy_tree_contents,
     copy_trial_docs_to_artifacts,
@@ -56,7 +55,7 @@ def bootstrap(config_path: str | Path) -> BootstrapResult:
     if not git.is_git_repo():
         raise RuntimeError(f"Workspace is not a git repo: {config.workspace_root}")
 
-    direvo_dir = config.workspace_root / ".direvo"
+    direvo_dir = config.experiment_root / ".direvo"
     direvo_dir.mkdir(parents=True, exist_ok=True)
     ensure_trial_directories(config.proposals_dir, config.artifacts_dir)
 
@@ -107,12 +106,12 @@ class Orchestrator:
         self.database_manager = database_manager
         self.logger = logger
         self.git_manager = git_manager or GitManager(config.workspace_root)
-        self.execution_manager = execution_manager or ExecutionManager(execution_command=config.execution_command)
+        self.execution_manager = execution_manager or ExecutionManager(execute_command=config.execute_command)
         self.planner_session = planner_session or create_planner_session(
-            command=config.planner_command,
-            workspace_root=config.workspace_root,
-            notify_template=config.planner_notify_template,
-            startup_timeout_sec=config.planner_start_timeout_sec,
+            command=config.plan_command,
+            experiment_root=config.experiment_root,
+            notify_template=config.plan_notify_template,
+            startup_timeout_sec=config.plan_start_timeout_sec,
         )
         self.idle_poll_interval_sec = idle_poll_interval_sec
         self._stop_requested = threading.Event()
@@ -192,7 +191,7 @@ class Orchestrator:
                             return
                         proposal = self.database_manager.claim_ready_proposal()
                         if proposal is None:
-                            if self.config.planner_command is None:
+                            if self.config.plan_command is None:
                                 if termination_reason is None:
                                     termination_reason = "queue_empty"
                                 return
@@ -236,7 +235,8 @@ class Orchestrator:
         except RuntimeError as exc:
             error = str(exc)
         self.database_manager.update_proposal_status(proposal.proposal_id, ProposalStatus.COMPLETED)
-        self._notify_planner_error(f"Invalid proposal {proposal.proposal_id}: {error}", proposal_id=proposal.proposal_id)
+        msg = f"Invalid proposal {proposal.proposal_id}: {error}"
+        self._notify_planner_error(msg, proposal_id=proposal.proposal_id)
         log_event(
             self.logger,
             "proposal_invalid",
@@ -279,12 +279,12 @@ class Orchestrator:
         """Resolve proposal docs paths across host/container workspace roots."""
         path = Path(artifacts_uri)
         if not path.is_absolute():
-            return self.config.workspace_root / path
+            return self.config.experiment_root / path
         if path.exists():
             return path
 
         try:
-            proposals_relative = self.config.proposals_dir.relative_to(self.config.workspace_root)
+            proposals_relative = self.config.proposals_dir.relative_to(self.config.experiment_root)
         except ValueError:
             return path
 
@@ -292,7 +292,7 @@ class Orchestrator:
         if start_index is None:
             return path
         relative_suffix = Path(*path.parts[start_index:])
-        return self.config.workspace_root / relative_suffix
+        return self.config.experiment_root / relative_suffix
 
     @staticmethod
     def _find_path_sequence(parts: tuple[str, ...], sequence: tuple[str, ...]) -> int | None:
@@ -308,6 +308,7 @@ class Orchestrator:
     def _run_claimed_trial(self, *, slot: int, proposal: ValidatedProposal) -> None:
         trial_id = self.database_manager.reserve_trial_id()
         branch_name = f"trial/{trial_id}-{proposal.slug}"
+        description = f"trial/{trial_id}-{proposal.slug}"
         log_event(
             self.logger,
             "trial_id_reserved",
@@ -317,7 +318,6 @@ class Orchestrator:
             branch=branch_name,
         )
         paths = self._prepare_trial(slot=slot, trial_id=trial_id, proposal=proposal, branch_name=branch_name)
-        description = f"Execute proposal '{proposal.slug}'. Read .direvo/trial/plan.md for details."
         log_event(
             self.logger,
             "proposal_claimed",
@@ -338,9 +338,10 @@ class Orchestrator:
             execution_result = self.execution_manager.run_execution(
                 worktree_path=paths.worktree_path,
                 slot=slot,
-                direction=description,
                 timeout_sec=self.config.execution_timeout_sec,
                 user=f"trial-{slot}",
+                slug=proposal.slug,
+                trial_id=trial_id,
             )
             log_event(
                 self.logger,
@@ -363,7 +364,7 @@ class Orchestrator:
 
             evaluation_result = self.execution_manager.run_evaluation(
                 worktree_path=paths.worktree_path,
-                eval_script=self._worktree_eval_script(paths.worktree_path),
+                evaluate_command=self.config.evaluate_command,
                 timeout_sec=self.config.evaluation_timeout_sec,
                 user=f"trial-{slot}",
             )
@@ -379,7 +380,7 @@ class Orchestrator:
 
             self.git_manager.commit_all(
                 paths.worktree_path,
-                f"trial/{trial_id}-{proposal.slug}: {description}",
+                f"{description}: completed",
             )
             commit_sha = self.git_manager.current_head_sha(paths.worktree_path)
             copy_trial_docs_to_artifacts(paths.trial_docs_path, paths.artifacts_path)
@@ -503,10 +504,3 @@ class Orchestrator:
                 proposal_id=proposal_id,
                 error=str(exc),
             )
-
-    def _worktree_eval_script(self, worktree_path: Path) -> Path:
-        try:
-            relative = self.config.eval_script.relative_to(self.config.workspace_root)
-        except ValueError:
-            raise RuntimeError("eval_script must live under the workspace root.") from None
-        return worktree_path / relative

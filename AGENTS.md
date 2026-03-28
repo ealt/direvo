@@ -20,11 +20,19 @@ This file provides guidance to AI agents working with this repository.
 
 DirEvo is an orchestration system that runs concurrent research trials inside a single Docker container. A **planner** proposes experiments via a shared SQLite database, and the **orchestrator** dispatches them as parallel git worktrees, each executed by an isolated Linux user.
 
+### Experiment Root vs Workspace Root
+
+The **experiment root** is the top-level directory (inferred from the config path — parent of `.direvo/`). It contains the config, scripts, databases, and the workspace as a subdirectory. The **workspace root** is a git repo specified by the `workspace` config field (relative to experiment root). Trials operate on worktrees of the workspace repo.
+
+This separation prevents reward hacking: the execution agent can only modify files in its worktree (a checkout of the workspace), while eval, execute, and plan scripts live outside the workspace at the experiment root.
+
+All paths in the config (commands, databases, proposals/artifacts dirs) are relative to experiment root. Command strings have their file-path tokens resolved against experiment root at config load time.
+
 ### Data Flow
 
 1. Planner process writes proposals to `proposals.db` (status: drafting → ready)
 2. Orchestrator's async dispatch loop atomically claims a ready proposal (`BEGIN IMMEDIATE`)
-3. For each claimed proposal, the orchestrator: reserves a trial ID in `results.db` → creates a git worktree → copies proposal docs → runs execution command → runs eval script → parses JSON metrics from eval stdout → commits results → records to `results.db`
+3. For each claimed proposal, the orchestrator: reserves a trial ID in `results.db` → creates a git worktree → copies proposal docs → runs execute command → runs evaluate command → parses JSON metrics from eval stdout → commits results → records to `results.db`
 4. Planner is notified of completed trials via stdin of its long-running subprocess
 
 ### Two-Database Design
@@ -47,21 +55,35 @@ direvo/
 │   ├── sql/            # SQL schema templates
 │   ├── cli.py          # CLI entry point
 │   ├── orchestrator.py # Async dispatch loop
-│   ├── config.py       # YAML loading, path resolution
+│   ├── config.py       # YAML loading, path resolution against experiment root
 │   ├── db.py           # SQLite manager for both databases
 │   ├── git_manager.py  # Worktree lifecycle, branch ops
 │   ├── execution.py    # Subprocess execution with user switching
-│   ├── planner.py      # Persistent planner subprocess
+│   ├── planner.py      # Persistent planner subprocess (CWD=experiment_root)
 │   ├── termination.py  # Stop condition evaluation
 │   ├── runtime.py      # Container user/permission bootstrap
 │   ├── worktree.py     # Trial directory setup
 │   ├── models.py       # Frozen dataclasses for config/results
 │   └── logging.py      # Logging configuration
 ├── tests/              # pytest suite, mirrors src modules
+│   └── fixtures/experiment/  # E2E test: seed-sum experiment
 ├── docker/             # entrypoint.sh
 ├── scripts/            # Docker integration/validation scripts
 ├── docs/plans/         # Implementation plans
 └── docs/prds/          # Product requirement documents
+```
+
+An experiment directory (e.g., `tests/fixtures/experiment/`) has this layout:
+
+```
+experiment/              # experiment_root
+├── .direvo/
+│   └── config.yaml
+├── plan.py              # planner script (outside workspace)
+├── execute.py           # execution script (outside workspace)
+├── eval.py              # evaluation script (outside workspace)
+└── workspace/           # workspace_root (git repo)
+    └── seeds.md         # trial data
 ```
 
 ## Key Patterns
@@ -77,6 +99,7 @@ direvo/
 - Git worktree cleanup requires both hard reset and clean; either alone leaves stale state.
 - The planner subprocess is long-lived and receives trial notifications via stdin, not polling.
 - Docker tests require privileged mode for user creation; use the scripts in `scripts/` rather than running Docker commands by hand.
+- The planner subprocess introduces timing non-determinism: a fast execution agent can exhaust the proposal queue before the planner reacts to completion notifications. The orchestrator handles this via idle-polling, but tests must not assume deterministic proposal ordering when a subprocess planner is involved.
 
 ## Coding Style
 
@@ -94,6 +117,9 @@ For detailed formatting rules, see [STYLE_GUIDE.md](STYLE_GUIDE.md).
 - Name files `tests/test_<area>.py` and functions `test_<behavior>()`
 - Add or update tests for any behavioral change, especially around git operations, SQLite coordination, orchestration flows, and Docker/runtime permissions
 - Run the repo-local suite first, then Docker scripts in `scripts/` for environment-specific behavior
+- Demos and examples must be exercised by the test suite — standalone scripts that aren't tested rot silently
+- When test inputs produce deterministic outputs, assert exact values rather than loose properties (e.g., verify scores against actual committed data, not just "scores increase")
+- When testing systems with async subprocesses, don't assume deterministic ordering — design assertions around structural invariants that hold regardless of timing
 
 ## Commit Guidelines
 

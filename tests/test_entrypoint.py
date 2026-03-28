@@ -68,8 +68,8 @@ def test_entrypoint_run_defaults_from_flag_only_invocation(tmp_path: Path) -> No
         textwrap.dedent(
             f"""
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
-            execution_command: "sh {fake_execution} {{direction}}"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "sh {fake_execution}"
             max_trials: 1
             max_wall_time: "1h"
             objective:
@@ -128,8 +128,8 @@ def test_entrypoint_doctor_skips_runtime_setup(tmp_path: Path) -> None:
         textwrap.dedent(
             f"""
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
-            execution_command: "sh {fake_execution} {{direction}}"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "sh {fake_execution}"
             max_trials: 1
             max_wall_time: "1h"
             objective:

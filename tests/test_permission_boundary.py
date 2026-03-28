@@ -49,7 +49,8 @@ def test_runtime_enforces_permission_boundaries(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             parallel_trials: 2
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 1
             max_wall_time: "1h"
             objective:

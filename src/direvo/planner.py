@@ -35,7 +35,7 @@ class PlannerSession:
 
 
 class NullPlannerSession(PlannerSession):
-    """No-op planner session used when no planner command is configured."""
+    """No-op planner session used when no plan command is configured."""
 
 
 class SubprocessPlannerSession(PlannerSession):
@@ -47,13 +47,13 @@ class SubprocessPlannerSession(PlannerSession):
         self,
         *,
         command: str,
-        workspace_root: Path,
+        experiment_root: Path,
         notify_template: str,
         startup_timeout_sec: int,
         user: str | None = "planner",
     ) -> None:
         self.command = command
-        self.workspace_root = workspace_root
+        self.experiment_root = experiment_root
         self.notify_template = notify_template
         self.startup_timeout_sec = startup_timeout_sec
         self.user = user
@@ -65,7 +65,7 @@ class SubprocessPlannerSession(PlannerSession):
             return
         self._process = subprocess.Popen(
             self._planner_command(),
-            cwd=self.workspace_root,
+            cwd=self.experiment_root,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -119,7 +119,7 @@ class SubprocessPlannerSession(PlannerSession):
         """Render the planner subprocess command."""
         command = shlex.split(self.command)
         if self.user and os.geteuid() == 0 and _user_exists(self.user):
-            shell_command = f"cd {shlex.quote(str(self.workspace_root))} && {shlex.join(command)}"
+            shell_command = f"cd {shlex.quote(str(self.experiment_root))} && {shlex.join(command)}"
             return ["su", self.user, "-s", "/bin/sh", "-c", shell_command]
         return command
 
@@ -134,14 +134,14 @@ def _user_exists(user: str) -> bool:
 
 
 def create_planner_session(
-    *, command: str | None, workspace_root: Path, notify_template: str, startup_timeout_sec: int
+    *, command: str | None, experiment_root: Path, notify_template: str, startup_timeout_sec: int
 ) -> PlannerSession:
     """Create the planner session implementation for the current config."""
     if command is None:
         return NullPlannerSession()
     return SubprocessPlannerSession(
         command=command,
-        workspace_root=workspace_root,
+        experiment_root=experiment_root,
         notify_template=notify_template,
         startup_timeout_sec=startup_timeout_sec,
     )

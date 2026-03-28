@@ -37,7 +37,8 @@ def _write_config(tmp_path: Path) -> Path:
         textwrap.dedent(
             """
             parallel_trials: 2
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:

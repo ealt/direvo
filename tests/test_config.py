@@ -10,13 +10,14 @@ def test_loads_valid_config(tmp_path: Path) -> None:
     direvo = tmp_path / ".direvo"
     direvo.mkdir()
     config_path = direvo / "config.yaml"
-    eval_script = tmp_path / "evaluate.sh"
-    eval_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    eval_py = tmp_path / "eval.py"
+    eval_py.write_text("print('ok')\n", encoding="utf-8")
     config_path.write_text(
         textwrap.dedent(
             """
             parallel_trials: 2
-            eval_script: "./evaluate.sh"
+            evaluate_command: "python3 eval.py"
+            execute_command: "claude -p"
             max_trials: 10
             max_wall_time: "24h"
             objective:
@@ -32,9 +33,9 @@ def test_loads_valid_config(tmp_path: Path) -> None:
     config = load_config(config_path)
 
     assert config.parallel_trials == 2
+    assert config.experiment_root == tmp_path
     assert config.workspace_root == tmp_path
-    assert config.eval_script == eval_script.resolve()
-    assert config.execution_command == "claude -p {direction}"
+    assert "eval.py" in config.evaluate_command
     assert config.max_wall_time_seconds == 86400
 
 
@@ -46,7 +47,8 @@ def test_rejects_invalid_metric_identifier(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             parallel_trials: 2
-            eval_script: "./evaluate.sh"
+            evaluate_command: "python3 eval.py"
+            execute_command: "claude -p"
             max_trials: 10
             max_wall_time: "24h"
             objective:
@@ -73,32 +75,6 @@ def test_rejects_invalid_yaml(tmp_path: Path) -> None:
         load_config(config_path)
 
 
-def test_rejects_execution_command_without_direction_placeholder(tmp_path: Path) -> None:
-    direvo = tmp_path / ".direvo"
-    direvo.mkdir()
-    config_path = direvo / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 2
-            eval_script: "./evaluate.sh"
-            execution_command: "claude -p"
-            max_trials: 10
-            max_wall_time: "24h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="execution_command"):
-        load_config(config_path)
-
-
 def test_rejects_invalid_objective_sql_expression(tmp_path: Path) -> None:
     direvo = tmp_path / ".direvo"
     direvo.mkdir()
@@ -107,7 +83,8 @@ def test_rejects_invalid_objective_sql_expression(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             parallel_trials: 2
-            eval_script: "./evaluate.sh"
+            evaluate_command: "python3 eval.py"
+            execute_command: "claude -p"
             max_trials: 10
             max_wall_time: "24h"
             objective:
@@ -132,7 +109,8 @@ def test_rejects_invalid_target_condition_sql(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             parallel_trials: 2
-            eval_script: "./evaluate.sh"
+            evaluate_command: "python3 eval.py"
+            execute_command: "claude -p"
             max_trials: 10
             max_wall_time: "24h"
             objective:
@@ -150,7 +128,7 @@ def test_rejects_invalid_target_condition_sql(tmp_path: Path) -> None:
         load_config(config_path)
 
 
-def test_rejects_planner_notify_template_without_trial_id(tmp_path: Path) -> None:
+def test_rejects_plan_notify_template_without_trial_id(tmp_path: Path) -> None:
     direvo = tmp_path / ".direvo"
     direvo.mkdir()
     config_path = direvo / "config.yaml"
@@ -158,8 +136,8 @@ def test_rejects_planner_notify_template_without_trial_id(tmp_path: Path) -> Non
         textwrap.dedent(
             """
             parallel_trials: 2
-            eval_script: "./evaluate.sh"
-            planner_notify_template: "Trial completed."
+            evaluate_command: "python3 eval.py"
+            plan_notify_template: "Trial completed."
             max_trials: 10
             max_wall_time: "24h"
             objective:
@@ -172,11 +150,11 @@ def test_rejects_planner_notify_template_without_trial_id(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    with pytest.raises(ConfigError, match="planner_notify_template"):
+    with pytest.raises(ConfigError, match="plan_notify_template"):
         load_config(config_path)
 
 
-def test_rejects_invalid_planner_notify_template_format_string(tmp_path: Path) -> None:
+def test_rejects_invalid_plan_notify_template_format_string(tmp_path: Path) -> None:
     direvo = tmp_path / ".direvo"
     direvo.mkdir()
     config_path = direvo / "config.yaml"
@@ -184,8 +162,8 @@ def test_rejects_invalid_planner_notify_template_format_string(tmp_path: Path) -
         textwrap.dedent(
             """
             parallel_trials: 2
-            eval_script: "./evaluate.sh"
-            planner_notify_template: "Trial {trial_id"
+            evaluate_command: "python3 eval.py"
+            plan_notify_template: "Trial {trial_id"
             max_trials: 10
             max_wall_time: "24h"
             objective:
@@ -198,5 +176,5 @@ def test_rejects_invalid_planner_notify_template_format_string(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    with pytest.raises(ConfigError, match="planner_notify_template"):
+    with pytest.raises(ConfigError, match="plan_notify_template"):
         load_config(config_path)

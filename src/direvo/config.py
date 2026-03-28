@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+import shlex
 import sqlite3
-from string import Formatter
 from pathlib import Path
+from string import Formatter
 
 import yaml
 
@@ -47,7 +48,10 @@ def load_config(config_path: str | Path) -> SessionConfig:
     if not isinstance(raw, dict):
         raise ConfigError("Config root must be a mapping.")
 
-    workspace_root = _infer_workspace_root(path)
+    experiment_root = _infer_experiment_root(path)
+    workspace_root = _resolve_path(
+        experiment_root, _string_default(raw, "workspace", ".")
+    )
     metrics_schema = _validate_metrics_schema(raw.get("metrics_schema"))
     objective = _validate_objective(raw.get("objective"))
 
@@ -64,8 +68,8 @@ def load_config(config_path: str | Path) -> SessionConfig:
         if not target_condition:
             raise ConfigError("target_condition must be a non-empty string when provided.")
 
-    planner_notify_template = _validate_planner_notify_template(
-        raw.get("planner_notify_template", "Trial completed. ID: {trial_id}")
+    plan_notify_template = _validate_plan_notify_template(
+        raw.get("plan_notify_template", "Trial completed. ID: {trial_id}")
     )
     _validate_sql_expressions(
         metrics_schema=metrics_schema,
@@ -75,9 +79,12 @@ def load_config(config_path: str | Path) -> SessionConfig:
 
     return SessionConfig(
         config_path=path,
+        experiment_root=experiment_root,
         workspace_root=workspace_root,
         parallel_trials=_require_positive_int(raw, "parallel_trials"),
-        eval_script=_resolve_path(workspace_root, _require_str(raw, "eval_script")),
+        evaluate_command=_resolve_command(
+            experiment_root, _require_str(raw, "evaluate_command")
+        ),
         max_trials=_require_positive_int(raw, "max_trials"),
         max_wall_time_seconds=_parse_duration(_require_str(raw, "max_wall_time")),
         metrics_schema=metrics_schema,
@@ -85,24 +92,27 @@ def load_config(config_path: str | Path) -> SessionConfig:
         convergence_window=convergence_window,
         target_condition=target_condition,
         results_db=_resolve_path(
-            workspace_root, raw.get("results_db", ".direvo/results.db")
+            experiment_root, raw.get("results_db", ".direvo/results.db")
         ),
         proposals_db=_resolve_path(
-            workspace_root, raw.get("proposals_db", ".direvo/proposals.db")
+            experiment_root, raw.get("proposals_db", ".direvo/proposals.db")
         ),
         proposals_dir=_resolve_path(
-            workspace_root, raw.get("proposals_dir", ".direvo/proposals")
+            experiment_root, raw.get("proposals_dir", ".direvo/proposals")
         ),
         artifacts_dir=_resolve_path(
-            workspace_root, raw.get("artifacts_dir", ".direvo/artifacts")
+            experiment_root, raw.get("artifacts_dir", ".direvo/artifacts")
         ),
-        execution_command=_validate_execution_command(
-            raw.get("execution_command", "claude -p {direction}")
+        execute_command=_resolve_command(
+            experiment_root,
+            _validate_execute_command(raw.get("execute_command")),
         ),
-        planner_command=_optional_str(raw, "planner_command"),
-        planner_notify_template=planner_notify_template,
-        planner_start_timeout_sec=_positive_int_default(
-            raw, "planner_start_timeout_sec", 60
+        plan_command=_resolve_command_optional(
+            experiment_root, _optional_str(raw, "plan_command")
+        ),
+        plan_notify_template=plan_notify_template,
+        plan_start_timeout_sec=_positive_int_default(
+            raw, "plan_start_timeout_sec", 60
         ),
         execution_timeout_sec=_positive_int_default(
             raw, "execution_timeout_sec", 1800
@@ -119,19 +129,44 @@ def load_config(config_path: str | Path) -> SessionConfig:
     )
 
 
-def _infer_workspace_root(config_path: Path) -> Path:
-    """Infer the workspace root from the config path."""
+def _infer_experiment_root(config_path: Path) -> Path:
+    """Infer the experiment root from the config path."""
     if config_path.parent.name == ".direvo":
         return config_path.parent.parent
     return config_path.parent
 
 
-def _resolve_path(workspace_root: Path, value: str) -> Path:
-    """Resolve a configured path relative to the workspace root."""
+def _resolve_path(base: Path, value: str) -> Path:
+    """Resolve a configured path relative to a base directory."""
     path = Path(value)
     if path.is_absolute():
         return path
-    return (workspace_root / path).resolve()
+    return (base / path).resolve()
+
+
+def _resolve_command(experiment_root: Path, command: str) -> str:
+    """Resolve file paths in a command string against the experiment root.
+
+    Each shell token is checked: if the experiment root contains a file at that
+    relative path, the token is replaced with its absolute path.  Tokens that
+    do not correspond to existing files are left unchanged.
+    """
+    tokens = shlex.split(command)
+    resolved: list[str] = []
+    for token in tokens:
+        candidate = experiment_root / token
+        if not Path(token).is_absolute() and candidate.is_file():
+            resolved.append(str(candidate))
+        else:
+            resolved.append(token)
+    return shlex.join(resolved)
+
+
+def _resolve_command_optional(experiment_root: Path, command: str | None) -> str | None:
+    """Resolve an optional command string."""
+    if command is None:
+        return None
+    return _resolve_command(experiment_root, command)
 
 
 def _require_str(data: dict[str, object], key: str) -> str:
@@ -226,31 +261,28 @@ def _parse_duration(value: str) -> int:
     return int(match.group("value")) * scale
 
 
-def _validate_execution_command(value: object) -> str:
-    """Validate the execution command template."""
+def _validate_execute_command(value: object) -> str:
+    """Validate the execute command template."""
     if not isinstance(value, str) or not value.strip():
-        raise ConfigError("execution_command must be a non-empty string.")
-    command = value.strip()
-    if "{direction}" not in command:
-        raise ConfigError("execution_command must include the {direction} placeholder.")
-    return command
+        raise ConfigError("execute_command must be a non-empty string.")
+    return value.strip()
 
 
-def _validate_planner_notify_template(value: object) -> str:
+def _validate_plan_notify_template(value: object) -> str:
     """Validate the planner notification template."""
     if not isinstance(value, str) or not value.strip():
-        raise ConfigError("planner_notify_template must be a non-empty string.")
+        raise ConfigError("plan_notify_template must be a non-empty string.")
     template = value.strip()
     try:
         fields = {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name is not None}
     except ValueError as exc:
-        raise ConfigError("planner_notify_template is not a valid format string.") from exc
+        raise ConfigError("plan_notify_template is not a valid format string.") from exc
     if "trial_id" not in fields:
-        raise ConfigError("planner_notify_template must include the {trial_id} placeholder.")
+        raise ConfigError("plan_notify_template must include the {trial_id} placeholder.")
     try:
         template.format(trial_id=1)
     except (IndexError, KeyError, ValueError) as exc:
-        raise ConfigError("planner_notify_template is not a valid format string.") from exc
+        raise ConfigError("plan_notify_template is not a valid format string.") from exc
     return template
 
 

@@ -47,12 +47,19 @@ class FakeExecutionManager:
         self.evaluation_success = evaluation_success
 
     def run_execution(
-        self, *, worktree_path: Path, slot: int, direction: str, timeout_sec: int, user: str | None = None
+        self,
+        *,
+        worktree_path: Path,
+        slot: int,
+        timeout_sec: int,
+        user: str | None = None,
+        slug: str = "",
+        trial_id: int = 0,
     ) -> ExecutionResult:
         (worktree_path / "code.txt").write_text("changed\n", encoding="utf-8")
         trial_dir = worktree_path / ".direvo" / "trial"
         trial_dir.mkdir(parents=True, exist_ok=True)
-        (trial_dir / "implementation.md").write_text(direction, encoding="utf-8")
+        (trial_dir / "implementation.md").write_text(slug, encoding="utf-8")
         return ExecutionResult(
             success=self.execution_success,
             stdout="",
@@ -61,7 +68,7 @@ class FakeExecutionManager:
         )
 
     def run_evaluation(
-        self, *, worktree_path: Path, eval_script: Path, timeout_sec: int, user: str | None = None
+        self, *, worktree_path: Path, evaluate_command: str, timeout_sec: int, user: str | None = None
     ) -> EvaluationResult:
         trial_dir = worktree_path / ".direvo" / "trial"
         trial_dir.mkdir(parents=True, exist_ok=True)
@@ -84,7 +91,14 @@ class SlowExecutionManager(FakeExecutionManager):
         self.max_active = 0
 
     def run_execution(
-        self, *, worktree_path: Path, slot: int, direction: str, timeout_sec: int, user: str | None = None
+        self,
+        *,
+        worktree_path: Path,
+        slot: int,
+        timeout_sec: int,
+        user: str | None = None,
+        slug: str = "",
+        trial_id: int = 0,
     ) -> ExecutionResult:
         with self._lock:
             self._active += 1
@@ -94,9 +108,10 @@ class SlowExecutionManager(FakeExecutionManager):
             return super().run_execution(
                 worktree_path=worktree_path,
                 slot=slot,
-                direction=direction,
                 timeout_sec=timeout_sec,
                 user=user,
+                slug=slug,
+                trial_id=trial_id,
             )
         finally:
             with self._lock:
@@ -109,29 +124,45 @@ class InterruptibleExecutionManager(SlowExecutionManager):
         self.started = threading.Event()
 
     def run_execution(
-        self, *, worktree_path: Path, slot: int, direction: str, timeout_sec: int, user: str | None = None
+        self,
+        *,
+        worktree_path: Path,
+        slot: int,
+        timeout_sec: int,
+        user: str | None = None,
+        slug: str = "",
+        trial_id: int = 0,
     ) -> ExecutionResult:
         self.started.set()
         return super().run_execution(
             worktree_path=worktree_path,
             slot=slot,
-            direction=direction,
             timeout_sec=timeout_sec,
             user=user,
+            slug=slug,
+            trial_id=trial_id,
         )
 
 
 class MergeResolvingExecutionManager(FakeExecutionManager):
     def run_execution(
-        self, *, worktree_path: Path, slot: int, direction: str, timeout_sec: int, user: str | None = None
+        self,
+        *,
+        worktree_path: Path,
+        slot: int,
+        timeout_sec: int,
+        user: str | None = None,
+        slug: str = "",
+        trial_id: int = 0,
     ) -> ExecutionResult:
         (worktree_path / "tracked.txt").write_text("resolved\n", encoding="utf-8")
         return super().run_execution(
             worktree_path=worktree_path,
             slot=slot,
-            direction=direction,
             timeout_sec=timeout_sec,
             user=user,
+            slug=slug,
+            trial_id=trial_id,
         )
 
 
@@ -172,7 +203,8 @@ def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -258,7 +290,8 @@ def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> 
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -339,7 +372,8 @@ def test_orchestrator_records_eval_error_but_keeps_commit(tmp_path: Path) -> Non
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -439,7 +473,8 @@ def test_orchestrator_creates_merge_trial_commit(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 1
             max_wall_time: "1h"
             objective:
@@ -525,7 +560,8 @@ def test_orchestrator_processes_multiple_slots_concurrently(tmp_path: Path) -> N
         textwrap.dedent(
             """
             parallel_trials: 2
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -610,7 +646,8 @@ def test_orchestrator_stops_when_target_condition_is_met(tmp_path: Path) -> None
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -694,7 +731,8 @@ def test_orchestrator_drains_in_flight_trial_after_stop_request(tmp_path: Path) 
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -794,7 +832,8 @@ def test_recovery_requires_clean_worktree_state(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -884,8 +923,9 @@ def test_orchestrator_waits_for_late_ready_proposal(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
-            planner_command: "planner"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
+            plan_command: "planner"
             max_trials: 1
             max_wall_time: "1h"
             objective:
@@ -953,7 +993,7 @@ def test_orchestrator_waits_for_late_ready_proposal(tmp_path: Path) -> None:
     assert proposal_row["status"] == "completed"
 
 
-def test_orchestrator_remaps_absolute_proposal_paths_to_workspace(tmp_path: Path) -> None:
+def test_orchestrator_remaps_absolute_proposal_paths_to_experiment_root(tmp_path: Path) -> None:
     (tmp_path / ".direvo").mkdir()
     (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
     (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
@@ -976,7 +1016,8 @@ def test_orchestrator_remaps_absolute_proposal_paths_to_workspace(tmp_path: Path
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 1
             max_wall_time: "1h"
             objective:
@@ -1050,7 +1091,8 @@ def test_orchestrator_completes_invalid_proposal_without_trial(tmp_path: Path) -
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -1127,7 +1169,8 @@ def test_trial_completion_survives_planner_notification_failure(tmp_path: Path) 
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 1
             max_wall_time: "1h"
             objective:
@@ -1203,7 +1246,8 @@ def test_invalid_proposal_survives_planner_error_notification_failure(tmp_path: 
         textwrap.dedent(
             """
             parallel_trials: 1
-            eval_script: "./evaluate.sh"
+            evaluate_command: "./evaluate.sh"
+            execute_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
