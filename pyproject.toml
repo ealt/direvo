@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "direvo"
+version = "0.1.0"
+description = "DirEvo orchestrator bootstrap and coordination core"
+readme = "docs/plans/v0.md"
+requires-python = ">=3.12"
+dependencies = [
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pyright>=1.1",
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.5",
+]
+
+[project.scripts]
+direvo = "direvo.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+direvo = ["sql/*.sql"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["A", "B", "D", "E", "F", "I", "PT", "SIM", "UP"]
+ignore = ["D100", "D105", "D107", "SIM108"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_*.py" = ["D"]
+
+[tool.pyright]
+typeCheckingMode = "standard"
+reportUnnecessaryTypeIgnoreComment = "warning"
+reportMissingTypeStubs = "none"

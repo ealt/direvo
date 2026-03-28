@@ -1,0 +1,289 @@
+"""Session config loading and validation."""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+from string import Formatter
+from pathlib import Path
+
+import yaml
+
+from .models import ObjectiveDirection, ObjectiveSpec, SessionConfig
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DURATION_RE = re.compile(r"^(?P<value>\d+)(?P<unit>[smhd])$")
+_SQLITE_TYPES = {"integer", "real", "text"}
+
+
+class ConfigError(ValueError):
+    """Raised when config validation fails."""
+
+
+def load_config(config_path: str | Path) -> SessionConfig:
+    """Load and validate a session config file.
+
+    Args:
+        config_path: Path to the YAML config file.
+
+    Returns:
+        Parsed and validated session config.
+
+    Raises:
+        ConfigError: If the file is missing or invalid.
+    """
+    path = Path(config_path).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).absolute()
+    if not path.exists():
+        raise ConfigError(f"Config file does not exist: {path}")
+
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            raw = yaml.safe_load(handle) or {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Config file is not valid YAML: {path}") from exc
+
+    if not isinstance(raw, dict):
+        raise ConfigError("Config root must be a mapping.")
+
+    workspace_root = _infer_workspace_root(path)
+    metrics_schema = _validate_metrics_schema(raw.get("metrics_schema"))
+    objective = _validate_objective(raw.get("objective"))
+
+    convergence_window = raw.get("convergence_window")
+    if convergence_window is not None:
+        if not isinstance(convergence_window, int) or convergence_window <= 0:
+            raise ConfigError("convergence_window must be a positive integer.")
+
+    target_condition = raw.get("target_condition")
+    if target_condition is not None and not isinstance(target_condition, str):
+        raise ConfigError("target_condition must be a string when provided.")
+    if target_condition is not None:
+        target_condition = target_condition.strip()
+        if not target_condition:
+            raise ConfigError("target_condition must be a non-empty string when provided.")
+
+    planner_notify_template = _validate_planner_notify_template(
+        raw.get("planner_notify_template", "Trial completed. ID: {trial_id}")
+    )
+    _validate_sql_expressions(
+        metrics_schema=metrics_schema,
+        objective_expr=objective.expr,
+        target_condition=target_condition,
+    )
+
+    return SessionConfig(
+        config_path=path,
+        workspace_root=workspace_root,
+        parallel_trials=_require_positive_int(raw, "parallel_trials"),
+        eval_script=_resolve_path(workspace_root, _require_str(raw, "eval_script")),
+        max_trials=_require_positive_int(raw, "max_trials"),
+        max_wall_time_seconds=_parse_duration(_require_str(raw, "max_wall_time")),
+        metrics_schema=metrics_schema,
+        objective=objective,
+        convergence_window=convergence_window,
+        target_condition=target_condition,
+        results_db=_resolve_path(
+            workspace_root, raw.get("results_db", ".direvo/results.db")
+        ),
+        proposals_db=_resolve_path(
+            workspace_root, raw.get("proposals_db", ".direvo/proposals.db")
+        ),
+        proposals_dir=_resolve_path(
+            workspace_root, raw.get("proposals_dir", ".direvo/proposals")
+        ),
+        artifacts_dir=_resolve_path(
+            workspace_root, raw.get("artifacts_dir", ".direvo/artifacts")
+        ),
+        execution_command=_validate_execution_command(
+            raw.get("execution_command", "claude -p {direction}")
+        ),
+        planner_command=_optional_str(raw, "planner_command"),
+        planner_notify_template=planner_notify_template,
+        planner_start_timeout_sec=_positive_int_default(
+            raw, "planner_start_timeout_sec", 60
+        ),
+        execution_timeout_sec=_positive_int_default(
+            raw, "execution_timeout_sec", 1800
+        ),
+        evaluation_timeout_sec=_positive_int_default(
+            raw, "evaluation_timeout_sec", 1800
+        ),
+        sqlite_busy_timeout_ms=_positive_int_default(
+            raw, "sqlite_busy_timeout_ms", 5000
+        ),
+        proposal_retry_priority_delta=_positive_float_default(
+            raw, "proposal_retry_priority_delta", 0.1
+        ),
+    )
+
+
+def _infer_workspace_root(config_path: Path) -> Path:
+    """Infer the workspace root from the config path."""
+    if config_path.parent.name == ".direvo":
+        return config_path.parent.parent
+    return config_path.parent
+
+
+def _resolve_path(workspace_root: Path, value: str) -> Path:
+    """Resolve a configured path relative to the workspace root."""
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return (workspace_root / path).resolve()
+
+
+def _require_str(data: dict[str, object], key: str) -> str:
+    """Require a non-empty string config value."""
+    value = data.get(key)
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"{key} must be a non-empty string.")
+    return value
+
+
+def _optional_str(data: dict[str, object], key: str) -> str | None:
+    """Return an optional string config value."""
+    value = data.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{key} must be a non-empty string when provided.")
+    return value.strip()
+
+
+def _string_default(data: dict[str, object], key: str, default: str) -> str:
+    """Return a string config value with a default."""
+    value = data.get(key, default)
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{key} must be a non-empty string.")
+    return value.strip()
+
+
+def _require_positive_int(data: dict[str, object], key: str) -> int:
+    """Require a positive integer config value."""
+    value = data.get(key)
+    if not isinstance(value, int) or value <= 0:
+        raise ConfigError(f"{key} must be a positive integer.")
+    return value
+
+
+def _positive_int_default(data: dict[str, object], key: str, default: int) -> int:
+    """Return a positive integer config value with a default."""
+    value = data.get(key, default)
+    if not isinstance(value, int) or value <= 0:
+        raise ConfigError(f"{key} must be a positive integer.")
+    return value
+
+
+def _positive_float_default(
+    data: dict[str, object], key: str, default: float
+) -> float:
+    """Return a positive float config value with a default."""
+    value = data.get(key, default)
+    if not isinstance(value, (int, float)) or value <= 0:
+        raise ConfigError(f"{key} must be a positive number.")
+    return float(value)
+
+
+def _validate_metrics_schema(value: object) -> dict[str, str]:
+    """Validate the dynamic metrics schema block."""
+    if not isinstance(value, dict) or not value:
+        raise ConfigError("metrics_schema must be a non-empty mapping.")
+    schema: dict[str, str] = {}
+    for key, type_name in value.items():
+        if not isinstance(key, str) or not _IDENTIFIER_RE.match(key):
+            raise ConfigError(f"Invalid metrics_schema key: {key!r}")
+        if not isinstance(type_name, str) or type_name.lower() not in _SQLITE_TYPES:
+            raise ConfigError(
+                f"metrics_schema[{key!r}] must be one of: {sorted(_SQLITE_TYPES)}"
+            )
+        schema[key] = type_name.lower()
+    return schema
+
+
+def _validate_objective(value: object) -> ObjectiveSpec:
+    """Validate the objective block."""
+    if not isinstance(value, dict):
+        raise ConfigError("objective must be a mapping.")
+    expr = value.get("expr")
+    direction = value.get("direction")
+    if not isinstance(expr, str) or not expr.strip():
+        raise ConfigError("objective.expr must be a non-empty string.")
+    try:
+        objective_direction = ObjectiveDirection(direction)
+    except ValueError as exc:
+        raise ConfigError("objective.direction must be maximize or minimize.") from exc
+    return ObjectiveSpec(expr=expr.strip(), direction=objective_direction)
+
+
+def _parse_duration(value: str) -> int:
+    """Parse a compact duration like ``24h`` into seconds."""
+    match = _DURATION_RE.match(value)
+    if not match:
+        raise ConfigError("max_wall_time must look like 30s, 5m, 24h, or 2d.")
+    scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[match.group("unit")]
+    return int(match.group("value")) * scale
+
+
+def _validate_execution_command(value: object) -> str:
+    """Validate the execution command template."""
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError("execution_command must be a non-empty string.")
+    command = value.strip()
+    if "{direction}" not in command:
+        raise ConfigError("execution_command must include the {direction} placeholder.")
+    return command
+
+
+def _validate_planner_notify_template(value: object) -> str:
+    """Validate the planner notification template."""
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError("planner_notify_template must be a non-empty string.")
+    template = value.strip()
+    try:
+        fields = {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name is not None}
+    except ValueError as exc:
+        raise ConfigError("planner_notify_template is not a valid format string.") from exc
+    if "trial_id" not in fields:
+        raise ConfigError("planner_notify_template must include the {trial_id} placeholder.")
+    try:
+        template.format(trial_id=1)
+    except (IndexError, KeyError, ValueError) as exc:
+        raise ConfigError("planner_notify_template is not a valid format string.") from exc
+    return template
+
+
+def _validate_sql_expressions(
+    *,
+    metrics_schema: dict[str, str],
+    objective_expr: str,
+    target_condition: str | None,
+) -> None:
+    """Validate SQL expressions against the dynamic trials schema."""
+    with sqlite3.connect(":memory:") as connection:
+        metric_columns = ", ".join(f"{name} {type_name.upper()}" for name, type_name in metrics_schema.items())
+        connection.execute(
+            f"""
+            CREATE TABLE trials (
+                trial_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                commit_sha TEXT,
+                parent_commits TEXT,
+                branch TEXT,
+                status TEXT,
+                artifacts_uri TEXT,
+                description TEXT,
+                timestamp TEXT
+                {", " if metric_columns else ""}{metric_columns}
+            )
+            """
+        )
+        try:
+            connection.execute(f"SELECT ({objective_expr}) FROM trials LIMIT 0")
+        except sqlite3.Error as exc:
+            raise ConfigError(f"objective.expr is not a valid SQL expression: {objective_expr}") from exc
+        if target_condition is not None:
+            try:
+                connection.execute(f"SELECT 1 FROM trials WHERE ({target_condition}) LIMIT 0")
+            except sqlite3.Error as exc:
+                raise ConfigError(f"target_condition is not a valid SQL WHERE clause: {target_condition}") from exc
