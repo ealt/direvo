@@ -36,7 +36,7 @@ def test_subprocess_planner_session_receives_notifications(tmp_path: Path) -> No
 
     session = SubprocessPlannerSession(
         command=f"python3 {script_path} {output_path}",
-        experiment_root=tmp_path,
+        planner_root=tmp_path,
         notify_template="Trial completed. ID: {trial_id}",
         startup_timeout_sec=1,
         user=None,
@@ -58,7 +58,7 @@ def test_subprocess_planner_session_receives_notifications(tmp_path: Path) -> No
 def test_subprocess_planner_session_fails_when_process_exits_immediately(tmp_path: Path) -> None:
     session = SubprocessPlannerSession(
         command="python3 -c 'import sys; sys.exit(1)'",
-        experiment_root=tmp_path,
+        planner_root=tmp_path,
         notify_template="Trial completed. ID: {trial_id}",
         startup_timeout_sec=1,
         user=None,
@@ -75,7 +75,7 @@ def test_subprocess_planner_session_runs_as_planner_user_when_root(
     monkeypatch.setattr("pwd.getpwnam", lambda user: object())
     session = SubprocessPlannerSession(
         command="python3 planner.py --watch",
-        experiment_root=tmp_path,
+        planner_root=tmp_path,
         notify_template="Trial completed. ID: {trial_id}",
         startup_timeout_sec=1,
     )
@@ -93,7 +93,7 @@ def test_subprocess_planner_session_runs_directly_when_not_root(
     monkeypatch.setattr("os.geteuid", lambda: 1000)
     session = SubprocessPlannerSession(
         command="python3 planner.py --watch",
-        experiment_root=tmp_path,
+        planner_root=tmp_path,
         notify_template="Trial completed. ID: {trial_id}",
         startup_timeout_sec=1,
     )
@@ -108,7 +108,7 @@ def test_subprocess_planner_session_runs_directly_when_planner_user_missing(
     monkeypatch.setattr("pwd.getpwnam", lambda user: (_ for _ in ()).throw(KeyError(user)))
     session = SubprocessPlannerSession(
         command="python3 planner.py --watch",
-        experiment_root=tmp_path,
+        planner_root=tmp_path,
         notify_template="Trial completed. ID: {trial_id}",
         startup_timeout_sec=1,
     )

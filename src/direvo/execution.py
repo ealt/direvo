@@ -21,7 +21,7 @@ class CommandTimeoutError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class ExecutionResult:
+class ImplementationResult:
     """Outcome from the execution agent."""
 
     success: bool
@@ -74,19 +74,19 @@ class CommandRunner:
             raise exc
 
 
-class ExecutionManager:
+class ImplementationManager:
     """Run execution-agent and evaluation commands."""
 
     def __init__(
         self,
         runner: CommandRunner | None = None,
         *,
-        execute_command: str = "echo {slug}",
+        implement_command: str = "echo {slug}",
     ) -> None:
         self.runner = runner or CommandRunner()
-        self.execute_command = execute_command
+        self.implement_command = implement_command
 
-    def run_execution(
+    def run_implementation(
         self,
         *,
         worktree_path: Path,
@@ -95,20 +95,20 @@ class ExecutionManager:
         user: str | None = None,
         slug: str = "",
         trial_id: int = 0,
-    ) -> ExecutionResult:
+    ) -> ImplementationResult:
         """Run the execution agent."""
-        command = self._render_execute_command(slug=slug, trial_id=trial_id)
+        command = self._render_implement_command(slug=slug, trial_id=trial_id)
         try:
             completed = self._run_as_user(command, cwd=worktree_path, timeout_sec=timeout_sec, user=user)
         except CommandTimeoutError:
-            return ExecutionResult(
+            return ImplementationResult(
                 success=False,
                 stdout="",
                 stderr="",
                 returncode=-1,
                 reason="timeout",
             )
-        return ExecutionResult(
+        return ImplementationResult(
             success=completed.returncode == 0,
             stdout=completed.stdout,
             stderr=completed.stderr,
@@ -193,10 +193,10 @@ class ExecutionManager:
             )
         return self.runner.run(command, cwd=cwd, timeout_sec=timeout_sec)
 
-    def _render_execute_command(self, **kwargs: object) -> list[str]:
+    def _render_implement_command(self, **kwargs: object) -> list[str]:
         """Render the configured execute command with optional template variables."""
         rendered: list[str] = []
-        for token in shlex.split(self.execute_command):
+        for token in shlex.split(self.implement_command):
             for key, value in kwargs.items():
                 token = token.replace(f"{{{key}}}", str(value))
             rendered.append(token)

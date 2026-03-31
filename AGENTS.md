@@ -20,32 +20,50 @@ This file provides guidance to AI agents working with this repository.
 
 DirEvo is an orchestration system that runs concurrent research trials inside a single Docker container. A **planner** proposes experiments via a shared SQLite database, and the **orchestrator** dispatches them as parallel git worktrees, each executed by an isolated Linux user.
 
-### Experiment Root vs Workspace Root
+### Experiment Root, Planner Root, And Workspace Root
 
-The **experiment root** is the top-level directory (inferred from the config path — parent of `.direvo/`). It contains the config, scripts, databases, and the workspace as a subdirectory. The **workspace root** is a git repo specified by the `workspace` config field (relative to experiment root). Trials operate on worktrees of the workspace repo.
+The **experiment root** is the top-level directory (inferred from the config path
+as the parent of `.direvo/`). It contains shared session state and acts as the
+outer trust boundary.
 
-This separation prevents reward hacking: the execution agent can only modify files in its worktree (a checkout of the workspace), while eval, execute, and plan scripts live outside the workspace at the experiment root.
+The **planner root** is configured by `planner_root`, must live under the
+experiment root, and contains planner-owned state such as `proposals.db`,
+proposal docs, and the planner subprocess working directory.
 
-All paths in the config (commands, databases, proposals/artifacts dirs) are relative to experiment root. Command strings have their file-path tokens resolved against experiment root at config load time.
+The **workspace root** is a git repo configured by `workspace`, resolved
+relative to `planner_root`, and must live under the planner root. Trials
+operate on worktrees of the workspace repo.
+
+This separation prevents reward hacking: the implementer can only modify files
+in its worktree, planner assets live under `planner_root`, and evaluation runs
+after the trial commit so eval-side writes can be reset without contaminating
+the committed result.
+
+Paths resolve by scope:
+- experiment-scoped paths resolve from `experiment_root`
+- planner-scoped paths resolve from `planner_root`
+- command file tokens are resolved against the command's scope root at config load time
 
 ### Data Flow
 
 1. Planner process writes proposals to `proposals.db` (status: drafting → ready)
 2. Orchestrator's async dispatch loop atomically claims a ready proposal (`BEGIN IMMEDIATE`)
-3. For each claimed proposal, the orchestrator: reserves a trial ID in `results.db` → creates a git worktree → copies proposal docs → runs execute command → runs evaluate command → parses JSON metrics from eval stdout → commits results → records to `results.db`
+3. For each claimed proposal, the orchestrator: reserves a trial ID in `results.db` → creates a git worktree → copies proposal docs → creates transient implementer grants → runs implement command → removes grants → commits results → runs evaluate command as root → resets eval-side writes → records to `results.db`
 4. Planner is notified of completed trials via stdin of its long-running subprocess
 
 ### Two-Database Design
 
-- **results.db**: Orchestrator writes, planner reads. Stores trial outcomes with user-defined metric columns from `metrics_schema` in config.
-- **proposals.db**: Planner writes, orchestrator reads/updates. Priority queue with atomic claiming. Proposals carry parent commits and a slug used for branch naming.
+- **results.db**: Orchestrator writes, planner reads. Uses SQLite `DELETE` journal mode and stores trial outcomes with user-defined metric columns from `metrics_schema`.
+- **proposals.db**: Planner writes, orchestrator reads/updates. Uses SQLite `WAL` journal mode and acts as the proposal queue. Proposals carry parent commits and a slug used for branch naming.
 
 ### Subprocess Isolation Model
 
 The system runs inside Docker with multiple Linux users created at container startup by `runtime.py`:
 - `planner` user: runs the planner subprocess, has read access to results.db and read/write to proposals.db
 - `trial-{slot}` users (one per `parallel_trials`): each owns their worktree, isolated from other slots
-- All subprocess commands (execution, evaluation, planner) are run via `su <user> -c` for permission enforcement
+- Planner subprocesses run as `planner` with `planner_root` as the working directory
+- Implement commands run as `trial-{slot}` from the slot worktree
+- Evaluation runs from the committed worktree as root, then the worktree is reset to `HEAD`
 
 ### Directory Structure
 
@@ -55,11 +73,12 @@ direvo/
 │   ├── sql/            # SQL schema templates
 │   ├── cli.py          # CLI entry point
 │   ├── orchestrator.py # Async dispatch loop
-│   ├── config.py       # YAML loading, path resolution against experiment root
+│   ├── config.py       # YAML loading, scoped path resolution, validation
 │   ├── db.py           # SQLite manager for both databases
 │   ├── git_manager.py  # Worktree lifecycle, branch ops
-│   ├── execution.py    # Subprocess execution with user switching
-│   ├── planner.py      # Persistent planner subprocess (CWD=experiment_root)
+│   ├── execution.py    # Implement/evaluate subprocess execution with user switching
+│   ├── grants.py       # Transient cross-scope grant symlink helpers
+│   ├── planner.py      # Persistent planner subprocess (CWD=planner_root)
 │   ├── termination.py  # Stop condition evaluation
 │   ├── runtime.py      # Container user/permission bootstrap
 │   ├── worktree.py     # Trial directory setup
@@ -79,11 +98,12 @@ An experiment directory (e.g., `tests/fixtures/experiment/`) has this layout:
 experiment/              # experiment_root
 ├── .direvo/
 │   └── config.yaml
-├── plan.py              # planner script (outside workspace)
-├── execute.py           # execution script (outside workspace)
-├── eval.py              # evaluation script (outside workspace)
-└── workspace/           # workspace_root (git repo)
-    └── seeds.md         # trial data
+├── eval.py              # evaluation script (experiment-scoped)
+├── implement.py         # implementer entry script (experiment-scoped)
+└── planner/             # planner_root
+    ├── plan.py          # planner script
+    └── workspace/       # workspace_root (git repo)
+        └── seeds.md     # trial data
 ```
 
 ## Key Patterns
@@ -99,7 +119,7 @@ experiment/              # experiment_root
 - Git worktree cleanup requires both hard reset and clean; either alone leaves stale state.
 - The planner subprocess is long-lived and receives trial notifications via stdin, not polling.
 - Docker tests require privileged mode for user creation; use the scripts in `scripts/` rather than running Docker commands by hand.
-- The planner subprocess introduces timing non-determinism: a fast execution agent can exhaust the proposal queue before the planner reacts to completion notifications. The orchestrator handles this via idle-polling, but tests must not assume deterministic proposal ordering when a subprocess planner is involved.
+- The planner subprocess introduces timing non-determinism: a fast implementer can exhaust the proposal queue before the planner reacts to completion notifications. The orchestrator handles this via idle-polling, but tests must not assume deterministic proposal ordering when a subprocess planner is involved.
 
 ## Coding Style
 

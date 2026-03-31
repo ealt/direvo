@@ -15,11 +15,11 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from direvo.orchestrator import Orchestrator, bootstrap
-
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "experiment"
 
@@ -92,7 +92,8 @@ def _verify_plan_log(
     # Exactly one startup event
     assert len(startups) == 1
     head = startups[0]["head"]
-    assert isinstance(head, str) and len(head) == 40
+    assert isinstance(head, str)
+    assert len(head) == 40
 
     # Initial proposals: exact count and deterministic content
     assert len(proposes) == initial_batch
@@ -117,7 +118,7 @@ def _verify_plan_log(
     assert all_seeds == list(range(len(all_seeds)))
 
     # React entries match results.db
-    for result_entry, react_entry in zip(results, reacts):
+    for result_entry, react_entry in zip(results, reacts, strict=True):
         tid = result_entry["trial_id"]
         assert tid in trials_by_id, f"result references unknown trial {tid}"
         trial = trials_by_id[tid]
@@ -165,15 +166,18 @@ def _verify_execute_log(
     assert all(e["event"] == "execute" for e in entries)
 
     for entry in entries:
-        seed = entry["seed"]
-        assert isinstance(seed, str) and seed.isdigit()
+        seed = cast(str, entry["seed"])
+        assert isinstance(seed, str)
+        assert seed.isdigit()
         # Append invariant: seeds_after == seeds_before + [seed]
-        assert entry["seeds_after"] == entry["seeds_before"] + [seed]
+        seeds_before = cast(list[str], entry["seeds_before"])
+        seeds_after = cast(list[str], entry["seeds_after"])
+        assert seeds_after == seeds_before + [seed]
 
     # Cross-check: each trial's committed seeds match exactly one execute entry
     matched: set[int] = set()
     for trial_row in trials:
-        seeds = _read_seeds_at_commit(workspace, trial_row["commit_sha"])
+        seeds = _read_seeds_at_commit(workspace, cast(str, trial_row["commit_sha"]))
         matches = [i for i, e in enumerate(entries) if e["seeds_after"] == seeds]
         assert len(matches) == 1, (
             f"Trial {trial_row['trial_id']}: expected one execute entry for seeds {seeds}, found {len(matches)}"
@@ -194,19 +198,19 @@ def _verify_eval_log(
     assert all(e["event"] == "eval" for e in entries)
 
     for entry in entries:
-        seeds = entry["seeds"]
-        values = entry["values"]
-        score = entry["score"]
+        seeds = cast(list[str], entry["seeds"])
+        values = cast(list[int], entry["values"])
+        score = cast(int, entry["score"])
         assert len(seeds) == len(values)
         # Each value matches the deterministic random mapping
-        for s, v in zip(seeds, values):
+        for s, v in zip(seeds, values, strict=True):
             assert v == _random_int(s), f"seed {s!r}: expected {_random_int(s)}, got {v}"
         # Score is the sum of individual values
         assert score == sum(values)
 
     # Cross-check: each trial's committed seeds match exactly one eval entry with correct score
     for trial_row in trials:
-        seeds = _read_seeds_at_commit(workspace, trial_row["commit_sha"])
+        seeds = _read_seeds_at_commit(workspace, cast(str, trial_row["commit_sha"]))
         matches = [e for e in entries if e["seeds"] == seeds]
         assert len(matches) == 1, (
             f"Trial {trial_row['trial_id']}: expected one eval entry for seeds {seeds}, found {len(matches)}"
@@ -222,7 +226,7 @@ def test_experiment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     experiment_root = tmp_path / "experiment"
     shutil.copytree(FIXTURE_DIR, experiment_root)
-    workspace = experiment_root / "workspace"
+    workspace = experiment_root / "planner" / "workspace"
 
     # Patch config to use the current venv python (system python3 may lack deps)
     config_path = experiment_root / ".direvo" / "config.yaml"
@@ -285,11 +289,13 @@ def test_experiment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Follow-up proposals reference trial IDs
     for p in proposals[initial_batch:]:
         slug = p["slug"]
-        assert slug.startswith("seed-") and "-t" in slug
+        assert slug.startswith("seed-")
+        assert "-t" in slug
 
     # --- Log verification ---
 
-    trials_by_id = {t["trial_id"]: t for t in successful}
+    successful_dicts = [dict(row) for row in successful]
+    trials_by_id = {int(t["trial_id"]): t for t in successful_dicts}
 
     _verify_plan_log(
         _parse_log(log_dir / "plan.log"),
@@ -301,13 +307,13 @@ def test_experiment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _verify_execute_log(
         _parse_log(log_dir / "execute.log"),
         max_trials=config.max_trials,
-        trials=successful,
+        trials=successful_dicts,
         workspace=workspace,
     )
 
     _verify_eval_log(
         _parse_log(log_dir / "eval.log"),
         max_trials=config.max_trials,
-        trials=successful,
+        trials=successful_dicts,
         workspace=workspace,
     )

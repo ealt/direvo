@@ -1,7 +1,8 @@
+planner_root: "./planner"
 workspace: "./workspace"
 parallel_trials: 1
 evaluate_command: "python3 eval.py"
-execute_command: "python3 execute.py"
+implement_command: "python3 implement.py"
 plan_command: "python3 plan.py"
 max_trials: 20
 max_wall_time: "10m"

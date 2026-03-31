@@ -19,8 +19,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import yaml
-
 _LOG_DIR = os.environ.get("DIREVO_LOG_DIR")
 
 
@@ -30,15 +28,6 @@ def _log(**fields: object) -> None:
         return
     with open(os.path.join(_LOG_DIR, "plan.log"), "a") as f:
         f.write(json.dumps(fields, sort_keys=True) + "\n")
-
-
-def get_config() -> dict:
-    """Load the experiment config."""
-    config_path = Path(".direvo/config.yaml")
-    with config_path.open() as f:
-        return yaml.safe_load(f)
-
-
 def get_head_sha(workspace: str) -> str:
     """Return the current HEAD commit SHA of the workspace repo."""
     result = subprocess.run(
@@ -52,10 +41,13 @@ def get_head_sha(workspace: str) -> str:
 
 
 def connect_db(path: str) -> sqlite3.Connection:
-    """Connect to a SQLite database with WAL mode."""
-    conn = sqlite3.connect(path)
+    """Connect to a SQLite database with the planner's access mode."""
+    if Path(path).name == "results.db":
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    else:
+        conn = sqlite3.connect(path)
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
@@ -103,9 +95,8 @@ def get_trial(results_db: str, trial_id: int) -> dict | None:
 
 def main() -> None:
     """Run the planner loop."""
-    config = get_config()
-    workspace = config.get("workspace", ".")
-    parallel_trials = config["parallel_trials"]
+    workspace = "workspace"
+    parallel_trials = 1
 
     head_sha = get_head_sha(workspace)
     _log(event="startup", parallel_trials=parallel_trials, head=head_sha)

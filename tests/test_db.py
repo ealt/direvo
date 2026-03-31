@@ -1,6 +1,7 @@
 import sqlite3
-from pathlib import Path
 import threading
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -108,7 +109,7 @@ def test_database_manager_closes_connections_after_operations(
     real_connect = sqlite3.connect
     connections: list[sqlite3.Connection] = []
 
-    def recording_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+    def recording_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
         connection = real_connect(*args, **kwargs)
         connections.append(connection)
         return connection
@@ -124,3 +125,15 @@ def test_database_manager_closes_connections_after_operations(
     for connection in connections:
         with pytest.raises(sqlite3.ProgrammingError, match="closed"):
             connection.execute("SELECT 1")
+
+
+def test_database_manager_uses_split_journal_modes(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+
+    with sqlite3.connect(manager.results_db) as results_conn:
+        results_mode = results_conn.execute("PRAGMA journal_mode").fetchone()[0]
+    with sqlite3.connect(manager.proposals_db) as proposals_conn:
+        proposals_mode = proposals_conn.execute("PRAGMA journal_mode").fetchone()[0]
+
+    assert results_mode == "delete"
+    assert proposals_mode == "wal"

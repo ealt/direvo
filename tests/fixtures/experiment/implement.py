@@ -1,4 +1,4 @@
-"""Execution agent for the seed-sum experiment.
+"""Implementation agent for the seed-sum experiment.
 
 Reads the seed from the trial plan and appends it to seeds.md.
 """

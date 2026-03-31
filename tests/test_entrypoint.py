@@ -1,6 +1,5 @@
 import os
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
@@ -13,12 +12,13 @@ def _run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> su
     return subprocess.run(command, cwd=cwd, check=True, capture_output=True, text=True, env=env)
 
 
-def _init_workspace(tmp_path: Path) -> tuple[Path, Path]:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / ".direvo").mkdir()
+def _init_workspace(tmp_path: Path) -> Path:
+    experiment_root = tmp_path / "experiment"
+    workspace = experiment_root / "planner" / "workspace"
+    workspace.mkdir(parents=True)
+    (experiment_root / ".direvo").mkdir(parents=True)
     (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    eval_script = workspace / "evaluate.sh"
+    eval_script = experiment_root / "evaluate.sh"
     eval_script.write_text("#!/bin/sh\nprintf '{\"test_pass_rate\": 1.0}\\n'\n", encoding="utf-8")
     eval_script.chmod(0o755)
 
@@ -28,7 +28,7 @@ def _init_workspace(tmp_path: Path) -> tuple[Path, Path]:
     _run(["git", "add", "."], cwd=workspace)
     _run(["git", "commit", "-m", "seed"], cwd=workspace)
 
-    fake_execution = tmp_path / "fake-execution.sh"
+    fake_execution = workspace / "fake-execution.sh"
     fake_execution.write_text(
         textwrap.dedent(
             """#!/bin/sh
@@ -40,7 +40,9 @@ def _init_workspace(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     fake_execution.chmod(0o755)
-    return workspace, fake_execution
+    _run(["git", "add", "."], cwd=workspace)
+    _run(["git", "commit", "-m", "add helper"], cwd=workspace)
+    return experiment_root
 
 
 def test_entrypoint_requires_arguments() -> None:
@@ -60,16 +62,19 @@ def test_entrypoint_requires_arguments() -> None:
 def test_entrypoint_run_defaults_from_flag_only_invocation(tmp_path: Path) -> None:
     entrypoint = Path(__file__).resolve().parents[1] / "docker" / "entrypoint.sh"
     repo_root = Path(__file__).resolve().parents[1]
-    workspace, fake_execution = _init_workspace(tmp_path)
+    experiment_root = _init_workspace(tmp_path)
+    workspace = experiment_root / "planner" / "workspace"
     head_sha = _run(["git", "rev-parse", "HEAD"], cwd=workspace).stdout.strip()
 
-    config_path = workspace / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".direvo" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
-            f"""
+            """
+            planner_root: "./planner"
+            workspace: "./workspace"
             parallel_trials: 1
             evaluate_command: "./evaluate.sh"
-            execute_command: "sh {fake_execution}"
+            implement_command: "sh fake-execution.sh"
             max_trials: 1
             max_wall_time: "1h"
             objective:
@@ -81,11 +86,10 @@ def test_entrypoint_run_defaults_from_flag_only_invocation(tmp_path: Path) -> No
         ),
         encoding="utf-8",
     )
-    proposal_dir = workspace / ".direvo" / "proposals" / "proposal-1"
+    config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
     proposal_dir.mkdir(parents=True)
     (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -122,14 +126,17 @@ def test_entrypoint_run_defaults_from_flag_only_invocation(tmp_path: Path) -> No
 def test_entrypoint_doctor_skips_runtime_setup(tmp_path: Path) -> None:
     entrypoint = Path(__file__).resolve().parents[1] / "docker" / "entrypoint.sh"
     repo_root = Path(__file__).resolve().parents[1]
-    workspace, fake_execution = _init_workspace(tmp_path)
-    config_path = workspace / ".direvo" / "config.yaml"
+    experiment_root = _init_workspace(tmp_path)
+    workspace = experiment_root / "planner" / "workspace"
+    config_path = experiment_root / ".direvo" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
-            f"""
+            """
+            planner_root: "./planner"
+            workspace: "./workspace"
             parallel_trials: 1
             evaluate_command: "./evaluate.sh"
-            execute_command: "sh {fake_execution}"
+            implement_command: "sh fake-execution.sh"
             max_trials: 1
             max_wall_time: "1h"
             objective:
@@ -155,7 +162,7 @@ def test_entrypoint_doctor_skips_runtime_setup(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert not (workspace / ".direvo" / "results.db").exists()
+    assert not (experiment_root / ".direvo" / "results.db").exists()
     assert not (workspace / "worktrees").exists()
 
 

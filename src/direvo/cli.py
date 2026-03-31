@@ -57,11 +57,11 @@ def doctor(config_path: Path) -> int:
     if not GitManager(config.workspace_root).is_git_repo():
         raise RuntimeError(f"Workspace is not a git repo: {config.workspace_root}")
 
-    execute_binary = shlex.split(config.execute_command)[0]
+    execute_binary = shlex.split(config.implement_command)[0]
     evaluate_binary = shlex.split(config.evaluate_command)[0]
     checks = {
         "git": _resolve_executable("git"),
-        "execute_command": _resolve_executable(execute_binary),
+        "implement_command": _resolve_executable(execute_binary),
         "evaluate_command": _resolve_executable(evaluate_binary),
     }
     if config.plan_command is not None:

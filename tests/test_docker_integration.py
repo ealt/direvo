@@ -1,7 +1,6 @@
 import os
 import shutil
 import subprocess
-import sys
 import textwrap
 import uuid
 from pathlib import Path
@@ -11,7 +10,6 @@ import pytest
 from direvo.config import load_config
 from direvo.db import DatabaseManager
 from direvo.models import ProposalStatus
-
 
 if shutil.which("docker") is None or os.environ.get("DIREVO_RUN_DOCKER_TESTS") != "1":
     pytestmark = pytest.mark.skip(reason="requires Docker and DIREVO_RUN_DOCKER_TESTS=1")
@@ -23,12 +21,13 @@ def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 
 def test_docker_run_smoke(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / ".direvo").mkdir()
+    experiment_root = tmp_path / "experiment"
+    workspace = experiment_root / "planner" / "workspace"
+    workspace.mkdir(parents=True)
+    (experiment_root / ".direvo").mkdir(parents=True)
     (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
 
-    eval_script = workspace / "evaluate.sh"
+    eval_script = experiment_root / "evaluate.sh"
     eval_script.write_text("#!/bin/sh\nprintf '{\"test_pass_rate\": 1.0}\\n'\n", encoding="utf-8")
     eval_script.chmod(0o755)
 
@@ -52,13 +51,15 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
     _run(["git", "commit", "-m", "seed"], cwd=workspace)
     head_sha = _run(["git", "rev-parse", "HEAD"], cwd=workspace).stdout.strip()
 
-    config_path = workspace / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".direvo" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
+            planner_root: "./planner"
+            workspace: "./workspace"
             parallel_trials: 1
             evaluate_command: "./evaluate.sh"
-            execute_command: "sh /workspace/fake-execution.sh"
+            implement_command: "sh fake-execution.sh"
             max_trials: 1
             max_wall_time: "1h"
             objective:
@@ -70,11 +71,10 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    proposal_dir = workspace / ".direvo" / "proposals" / "proposal-1"
+    config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
     proposal_dir.mkdir(parents=True)
     (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -99,10 +99,10 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
                 "run",
                 "--rm",
                 "-v",
-                f"{workspace}:/workspace",
+                f"{experiment_root}:/experiment",
                 image_tag,
                 "--config",
-                "/workspace/.direvo/config.yaml",
+                "/experiment/.direvo/config.yaml",
             ],
             cwd=repo_root,
             check=True,
@@ -116,4 +116,4 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
     assert trial_row is not None
     assert trial_row["status"] == "success"
     assert trial_row["commit_sha"]
-    assert (workspace / ".direvo" / "artifacts" / "trial-1" / "implementation.md").exists()
+    assert (experiment_root / ".direvo" / "artifacts" / "trial-1" / "implementation.md").exists()
