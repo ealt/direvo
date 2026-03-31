@@ -12,11 +12,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 
 from .config import load_config
 from .db import DatabaseManager
-from .execution import ExecutionManager
+from .execution import ImplementationManager
 from .git_manager import GitManager
+from .grants import create_grant_symlinks, remove_grant_symlinks
 from .logging import configure_logging, log_event
 from .models import (
     ProposalClaim,
@@ -48,6 +50,18 @@ class BootstrapResult:
     logger: logging.Logger
 
 
+def _ensure_symlink(source: Path, target: Path) -> None:
+    """Create or refresh a symlink to a known source path."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink():
+        if target.resolve() == source.resolve():
+            return
+        target.unlink()
+    elif target.exists():
+        raise RuntimeError(f"Cannot create symlink over existing path: {target}")
+    target.symlink_to(source)
+
+
 def bootstrap(config_path: str | Path) -> BootstrapResult:
     """Bootstrap the workspace and initialize persistent session state."""
     config = load_config(config_path)
@@ -56,8 +70,18 @@ def bootstrap(config_path: str | Path) -> BootstrapResult:
         raise RuntimeError(f"Workspace is not a git repo: {config.workspace_root}")
 
     direvo_dir = config.experiment_root / ".direvo"
+    planner_direvo_dir = config.planner_root / ".direvo"
     direvo_dir.mkdir(parents=True, exist_ok=True)
+    planner_direvo_dir.mkdir(parents=True, exist_ok=True)
     ensure_trial_directories(config.proposals_dir, config.artifacts_dir)
+    _ensure_symlink(config.results_db, planner_direvo_dir / "results.db")
+    _ensure_symlink(config.artifacts_dir, planner_direvo_dir / "artifacts")
+    create_grant_symlinks(
+        config.file_permissions,
+        actor="planner",
+        source_root=config.experiment_root,
+        target_root=config.planner_root,
+    )
 
     database_manager = DatabaseManager(
         results_db=config.results_db,
@@ -98,7 +122,7 @@ class Orchestrator:
         logger: logging.Logger,
         *,
         git_manager: GitManager | None = None,
-        execution_manager: ExecutionManager | None = None,
+        execution_manager: ImplementationManager | None = None,
         planner_session: PlannerSession | None = None,
         idle_poll_interval_sec: float = 1.0,
     ) -> None:
@@ -106,10 +130,12 @@ class Orchestrator:
         self.database_manager = database_manager
         self.logger = logger
         self.git_manager = git_manager or GitManager(config.workspace_root)
-        self.execution_manager = execution_manager or ExecutionManager(execute_command=config.execute_command)
+        self.execution_manager = execution_manager or ImplementationManager(
+            implement_command=config.implement_command
+        )
         self.planner_session = planner_session or create_planner_session(
             command=config.plan_command,
-            experiment_root=config.experiment_root,
+            planner_root=config.planner_root,
             notify_template=config.plan_notify_template,
             startup_timeout_sec=config.plan_start_timeout_sec,
         )
@@ -137,7 +163,7 @@ class Orchestrator:
         if threading.current_thread() is not threading.main_thread():
             return lambda: None
 
-        previous_handlers: dict[int, object] = {}
+        previous_handlers: dict[int, signal.Handlers | int | Callable[[int, FrameType | None], object] | None] = {}
 
         def handle_signal(signum: int, _frame: object) -> None:
             log_event(self.logger, "signal_received", signal=signum)
@@ -279,12 +305,12 @@ class Orchestrator:
         """Resolve proposal docs paths across host/container workspace roots."""
         path = Path(artifacts_uri)
         if not path.is_absolute():
-            return self.config.experiment_root / path
+            return self.config.planner_root / path
         if path.exists():
             return path
 
         try:
-            proposals_relative = self.config.proposals_dir.relative_to(self.config.experiment_root)
+            proposals_relative = self.config.proposals_dir.relative_to(self.config.planner_root)
         except ValueError:
             return path
 
@@ -292,7 +318,7 @@ class Orchestrator:
         if start_index is None:
             return path
         relative_suffix = Path(*path.parts[start_index:])
-        return self.config.experiment_root / relative_suffix
+        return self.config.planner_root / relative_suffix
 
     @staticmethod
     def _find_path_sequence(parts: tuple[str, ...], sequence: tuple[str, ...]) -> int | None:
@@ -334,39 +360,54 @@ class Orchestrator:
             trial_id=trial_id,
             branch=branch_name,
         )
+        created_grants: list[Path] = []
         try:
-            execution_result = self.execution_manager.run_execution(
+            created_grants = create_grant_symlinks(
+                self.config.file_permissions,
+                actor="implementer",
+                source_root=self.config.experiment_root,
+                target_root=paths.worktree_path,
+                skip_existing=True,
+            )
+            implementation_result = self.execution_manager.run_implementation(
                 worktree_path=paths.worktree_path,
                 slot=slot,
-                timeout_sec=self.config.execution_timeout_sec,
+                timeout_sec=self.config.implement_timeout_sec,
                 user=f"trial-{slot}",
                 slug=proposal.slug,
                 trial_id=trial_id,
             )
+            remove_grant_symlinks(created_grants, target_root=paths.worktree_path)
+            created_grants = []
             log_event(
                 self.logger,
-                "execution_complete",
+                "implementation_complete",
                 trial_id=trial_id,
                 slot=slot,
-                exit_code=execution_result.returncode,
-                reason=execution_result.reason,
+                exit_code=implementation_result.returncode,
+                reason=implementation_result.reason,
             )
-            if not execution_result.success:
+            if not implementation_result.success:
                 self._recover_trial(
                     slot=slot,
                     trial_id=trial_id,
                     proposal=proposal,
                     branch_name=branch_name,
                     parent_commits=json.dumps(proposal.parent_commits),
-                    error_message=execution_result.reason or "execution_failed",
+                    error_message=implementation_result.reason or "implementation_failed",
                 )
                 return
 
+            self.git_manager.commit_all(
+                paths.worktree_path,
+                f"{description}: completed",
+            )
+            commit_sha = self.git_manager.current_head_sha(paths.worktree_path)
             evaluation_result = self.execution_manager.run_evaluation(
                 worktree_path=paths.worktree_path,
                 evaluate_command=self.config.evaluate_command,
                 timeout_sec=self.config.evaluation_timeout_sec,
-                user=f"trial-{slot}",
+                user=None,
             )
             log_event(
                 self.logger,
@@ -378,12 +419,8 @@ class Orchestrator:
                 reason=evaluation_result.reason,
             )
 
-            self.git_manager.commit_all(
-                paths.worktree_path,
-                f"{description}: completed",
-            )
-            commit_sha = self.git_manager.current_head_sha(paths.worktree_path)
             copy_trial_docs_to_artifacts(paths.trial_docs_path, paths.artifacts_path)
+            self._reset_evaluation_artifacts(paths.worktree_path)
 
             status = TrialStatus.SUCCESS if evaluation_result.success else TrialStatus.EVAL_ERROR
             self.database_manager.update_trial(
@@ -409,6 +446,8 @@ class Orchestrator:
             )
             self._notify_planner_trial_completed(trial_id=trial_id, proposal_id=proposal.proposal_id)
         except Exception as exc:
+            if created_grants:
+                remove_grant_symlinks(created_grants, target_root=paths.worktree_path)
             self._recover_trial(
                 slot=slot,
                 trial_id=trial_id,
@@ -437,6 +476,12 @@ class Orchestrator:
             trial_docs_path=trial_docs_path,
             artifacts_path=artifacts_path,
         )
+
+    def _reset_evaluation_artifacts(self, worktree_path: Path) -> None:
+        """Restore the committed worktree state after evaluation."""
+        self.git_manager.reset_hard(worktree_path)
+        self.git_manager.clean_untracked(worktree_path)
+        self.git_manager.require_clean_status(worktree_path)
 
     def _recover_trial(
         self,

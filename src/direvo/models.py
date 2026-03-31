@@ -46,6 +46,7 @@ class SessionConfig:
 
     config_path: Path
     experiment_root: Path
+    planner_root: Path
     workspace_root: Path
     parallel_trials: int
     evaluate_command: str
@@ -59,14 +60,23 @@ class SessionConfig:
     proposals_db: Path
     proposals_dir: Path
     artifacts_dir: Path
-    execute_command: str
+    implement_command: str
     plan_command: str | None
+    file_permissions: tuple[FilePermissionGrant, ...]
     plan_notify_template: str
     plan_start_timeout_sec: int
-    execution_timeout_sec: int
+    implement_timeout_sec: int
     evaluation_timeout_sec: int
     sqlite_busy_timeout_ms: int
     proposal_retry_priority_delta: float
+
+
+@dataclass(frozen=True)
+class FilePermissionGrant:
+    """A validated cross-scope file grant."""
+
+    path: str
+    actor: str
 
 
 @dataclass(frozen=True)

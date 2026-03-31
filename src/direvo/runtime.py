@@ -37,7 +37,12 @@ class RuntimeSetup:
         for slot in range(config.parallel_trials):
             self._ensure_user(f"trial-{slot}")
 
+        self._ensure_ancestor_traversal(config.planner_root)
         self._ensure_ancestor_traversal(config.workspace_root)
+        self._apply_directory_permissions(config.experiment_root, user="root", group="root", mode=0o711)
+        self._apply_directory_permissions(config.experiment_root / ".direvo", user="root", group="root", mode=0o711)
+        self._apply_directory_permissions(config.planner_root, user="planner", group="planner", mode=0o751)
+        self._apply_directory_permissions(config.planner_root / ".direvo", user="planner", group="planner", mode=0o750)
         self._apply_directory_permissions(config.workspace_root, user="root", group="planner", mode=0o751)
         self._apply_directory_permissions(config.workspace_root / ".direvo", user="root", group="planner", mode=0o750)
         self._apply_mode(config.workspace_root / "worktrees", 0o755)
@@ -64,15 +69,28 @@ class RuntimeSetup:
         )
         self._apply_file_permissions(config.results_db, user="root", group="planner", mode=0o640)
         self._apply_file_permissions(config.proposals_db, user="planner", group="root", mode=0o660)
+        self._apply_grant_source_permissions(config)
 
     def _ensure_directories(self, config: SessionConfig) -> None:
         """Create the directory layout needed by the runtime."""
+        (config.experiment_root / ".direvo").mkdir(parents=True, exist_ok=True)
+        (config.planner_root / ".direvo").mkdir(parents=True, exist_ok=True)
         (config.workspace_root / ".direvo").mkdir(parents=True, exist_ok=True)
         (config.workspace_root / "worktrees").mkdir(parents=True, exist_ok=True)
         config.proposals_dir.mkdir(parents=True, exist_ok=True)
         config.artifacts_dir.mkdir(parents=True, exist_ok=True)
         config.results_db.parent.mkdir(parents=True, exist_ok=True)
         config.proposals_db.parent.mkdir(parents=True, exist_ok=True)
+
+    def _apply_grant_source_permissions(self, config: SessionConfig) -> None:
+        """Make explicitly granted files readable to the intended actor."""
+        for grant in config.file_permissions:
+            source = config.experiment_root / grant.path
+            self._ensure_ancestor_traversal(source)
+            if grant.actor == "planner":
+                self._apply_file_permissions(source, user="root", group="planner", mode=0o640)
+            else:
+                self._apply_file_permissions(source, user="root", group="root", mode=0o644)
 
     def _ensure_user(self, username: str) -> None:
         """Ensure a system user exists."""

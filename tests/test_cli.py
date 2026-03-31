@@ -12,29 +12,35 @@ def _run(command: list[str], cwd: Path) -> None:
 
 
 @pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    eval_script = tmp_path / "evaluate.sh"
+def experiment(tmp_path: Path) -> tuple[Path, Path]:
+    experiment_root = tmp_path / "experiment"
+    planner_root = experiment_root / "planner"
+    workspace = planner_root / "workspace"
+    (experiment_root / ".direvo").mkdir(parents=True)
+    workspace.mkdir(parents=True)
+    (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
+    eval_script = experiment_root / "evaluate.sh"
     eval_script.write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
     eval_script.chmod(0o755)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    return tmp_path
+    _run(["git", "init"], cwd=workspace)
+    _run(["git", "config", "user.email", "test@example.com"], cwd=workspace)
+    _run(["git", "config", "user.name", "Test User"], cwd=workspace)
+    _run(["git", "add", "."], cwd=workspace)
+    _run(["git", "commit", "-m", "seed"], cwd=workspace)
+    return experiment_root, workspace
 
 
-def _write_config(workspace: Path) -> Path:
-    config_path = workspace / ".direvo" / "config.yaml"
+def _write_config(experiment_root: Path) -> Path:
+    config_path = experiment_root / ".direvo" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
+            planner_root: "./planner"
+            workspace: "./workspace"
             parallel_trials: 1
             evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
+            implement_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -50,19 +56,21 @@ def _write_config(workspace: Path) -> Path:
 
 
 def test_doctor_validates_runtime_requirements(
-    monkeypatch: pytest.MonkeyPatch, workspace: Path
+    monkeypatch: pytest.MonkeyPatch, experiment: tuple[Path, Path]
 ) -> None:
-    config_path = _write_config(workspace)
+    experiment_root, _workspace = experiment
+    config_path = _write_config(experiment_root)
     monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
 
     assert doctor(config_path) == 0
 
 
 def test_doctor_rejects_non_executable_eval_script(
-    monkeypatch: pytest.MonkeyPatch, workspace: Path
+    monkeypatch: pytest.MonkeyPatch, experiment: tuple[Path, Path]
 ) -> None:
-    config_path = _write_config(workspace)
-    (workspace / "evaluate.sh").chmod(0o644)
+    experiment_root, _workspace = experiment
+    config_path = _write_config(experiment_root)
+    (experiment_root / "evaluate.sh").chmod(0o644)
     monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
 
     with pytest.raises(RuntimeError, match="Missing required executables"):

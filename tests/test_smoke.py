@@ -15,12 +15,13 @@ def _run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> su
 
 
 def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / ".direvo").mkdir()
+    experiment_root = tmp_path / "experiment"
+    workspace = experiment_root / "planner" / "workspace"
+    (experiment_root / ".direvo").mkdir(parents=True)
+    workspace.mkdir(parents=True)
     (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
 
-    eval_script = workspace / "evaluate.sh"
+    eval_script = experiment_root / "evaluate.sh"
     eval_script.write_text(
         "#!/bin/sh\nprintf '{\"test_pass_rate\": 1.0}\\n'\n",
         encoding="utf-8",
@@ -32,12 +33,8 @@ def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
     _run(["git", "config", "user.name", "Test User"], cwd=workspace)
     _run(["git", "add", "."], cwd=workspace)
     _run(["git", "commit", "-m", "seed"], cwd=workspace)
-    head_sha = _run(["git", "rev-parse", "HEAD"], cwd=workspace).stdout.strip()
-
-    config_path = workspace / ".direvo" / "config.yaml"
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    fake_claude = fake_bin / "claude"
+    config_path = experiment_root / ".direvo" / "config.yaml"
+    fake_claude = workspace / "fake-implement.sh"
     fake_claude.write_text(
         textwrap.dedent(
             """#!/bin/sh
@@ -52,10 +49,12 @@ def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
 
     config_path.write_text(
         textwrap.dedent(
-            f"""
+            """
+            planner_root: "./planner"
+            workspace: "./workspace"
             parallel_trials: 1
             evaluate_command: "./evaluate.sh"
-            execute_command: "sh {fake_claude}"
+            implement_command: "sh fake-implement.sh"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -67,12 +66,14 @@ def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-
-    proposal_dir = workspace / ".direvo" / "proposals" / "proposal-1"
-    proposal_dir.mkdir(parents=True)
-    (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
+    _run(["git", "add", "fake-implement.sh"], cwd=workspace)
+    _run(["git", "commit", "-m", "add implement helper"], cwd=workspace)
+    head_sha = _run(["git", "rev-parse", "HEAD"], cwd=workspace).stdout.strip()
 
     config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
+    proposal_dir.mkdir(parents=True)
+    (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
     RuntimeSetup().prepare(config)
     database_manager = DatabaseManager(
         results_db=config.results_db,
@@ -113,9 +114,9 @@ def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
     assert proposal_row is not None
     assert proposal_row["status"] == "completed"
 
-    artifact_plan = workspace / ".direvo" / "artifacts" / "trial-1" / "plan.md"
-    artifact_impl = workspace / ".direvo" / "artifacts" / "trial-1" / "implementation.md"
-    session_log = workspace / ".direvo" / "session.log"
+    artifact_plan = experiment_root / ".direvo" / "artifacts" / "trial-1" / "plan.md"
+    artifact_impl = experiment_root / ".direvo" / "artifacts" / "trial-1" / "implementation.md"
+    session_log = experiment_root / ".direvo" / "session.log"
     assert artifact_plan.exists()
     assert artifact_impl.exists()
     assert session_log.exists()

@@ -13,21 +13,21 @@ for follow-up proposals equals the completed trial's score.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
-import yaml
+_LOG_DIR = os.environ.get("DIREVO_LOG_DIR")
 
 
-def get_config() -> dict:
-    """Load the experiment config."""
-    config_path = Path(".direvo/config.yaml")
-    with config_path.open() as f:
-        return yaml.safe_load(f)
-
-
+def _log(**fields: object) -> None:
+    """Append a JSON log line to plan.log if DIREVO_LOG_DIR is set."""
+    if _LOG_DIR is None:
+        return
+    with open(os.path.join(_LOG_DIR, "plan.log"), "a") as f:
+        f.write(json.dumps(fields, sort_keys=True) + "\n")
 def get_head_sha(workspace: str) -> str:
     """Return the current HEAD commit SHA of the workspace repo."""
     result = subprocess.run(
@@ -41,10 +41,13 @@ def get_head_sha(workspace: str) -> str:
 
 
 def connect_db(path: str) -> sqlite3.Connection:
-    """Connect to a SQLite database with WAL mode."""
-    conn = sqlite3.connect(path)
+    """Connect to a SQLite database with the planner's access mode."""
+    if Path(path).name == "results.db":
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    else:
+        conn = sqlite3.connect(path)
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
@@ -92,11 +95,11 @@ def get_trial(results_db: str, trial_id: int) -> dict | None:
 
 def main() -> None:
     """Run the planner loop."""
-    config = get_config()
-    workspace = config.get("workspace", ".")
-    parallel_trials = config["parallel_trials"]
+    workspace = "workspace"
+    parallel_trials = 1
 
     head_sha = get_head_sha(workspace)
+    _log(event="startup", parallel_trials=parallel_trials, head=head_sha)
 
     proposals_db = ".direvo/proposals.db"
     results_db = ".direvo/results.db"
@@ -105,7 +108,7 @@ def main() -> None:
     initial_batch = parallel_trials + 2
     next_seed = 0
 
-    for i in range(initial_batch):
+    for _ in range(initial_batch):
         slug = f"seed-{next_seed}-init"
         create_proposal(
             proposals_db=proposals_db,
@@ -115,6 +118,7 @@ def main() -> None:
             parent_commits=[head_sha],
             seed=next_seed,
         )
+        _log(event="propose", seed=next_seed, slug=slug, priority=float(next_seed), parent=head_sha)
         next_seed += 1
 
     seen_trials: set[int] = set()
@@ -129,6 +133,8 @@ def main() -> None:
         except (ValueError, IndexError):
             continue
 
+        _log(event="notify", trial_id=trial_id)
+
         if trial_id in seen_trials:
             continue
         seen_trials.add(trial_id)
@@ -136,6 +142,8 @@ def main() -> None:
         trial = get_trial(results_db, trial_id)
         if trial is None or trial["commit_sha"] is None:
             continue
+
+        _log(event="result", trial_id=trial_id, commit=trial["commit_sha"], score=trial["score"])
 
         slug = f"seed-{next_seed}-t{trial_id}"
         create_proposal(
@@ -145,6 +153,14 @@ def main() -> None:
             slug=slug,
             parent_commits=[trial["commit_sha"]],
             seed=next_seed,
+        )
+        _log(
+            event="react",
+            seed=next_seed,
+            slug=slug,
+            priority=float(trial["score"]),
+            parent=trial["commit_sha"],
+            trial_id=trial_id,
         )
         next_seed += 1
 

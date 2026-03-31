@@ -4,8 +4,21 @@ Reads seeds from seeds.md, maps each to a deterministic random int,
 and outputs the sum as a JSON metric.
 """
 
+from __future__ import annotations
+
 import json
+import os
 import random
+
+_LOG_DIR = os.environ.get("DIREVO_LOG_DIR")
+
+
+def _log(**fields: object) -> None:
+    """Append a JSON log line to eval.log if DIREVO_LOG_DIR is set."""
+    if _LOG_DIR is None:
+        return
+    with open(os.path.join(_LOG_DIR, "eval.log"), "a") as f:
+        f.write(json.dumps(fields, sort_keys=True) + "\n")
 
 
 def eval_trial() -> int:
@@ -17,7 +30,10 @@ def eval_trial() -> int:
         random.seed(seed)
         return random.randint(0, 100)
 
-    return sum(map(random_int, seeds))
+    values = list(map(random_int, seeds))
+    score = sum(values)
+    _log(event="eval", seeds=seeds, values=values, score=score)
+    return score
 
 
 def main() -> None:

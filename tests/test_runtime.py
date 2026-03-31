@@ -1,13 +1,14 @@
+import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
 
 from direvo.config import load_config
-from direvo.runtime import RuntimeSetup
+from direvo.runtime import RuntimeSetup, SystemRunner
 
 
-class FakeRunner:
+class FakeRunner(SystemRunner):
     def __init__(self) -> None:
         self.commands: list[list[str]] = []
         self.existing_users: set[str] = set()
@@ -16,29 +17,25 @@ class FakeRunner:
         self.commands.append(command)
         if command[:2] == ["id", "-u"]:
             username = command[2]
-            return _FakeCompletedProcess(0 if username in self.existing_users else 1)
+            return subprocess.CompletedProcess(command, 0 if username in self.existing_users else 1, "", "")
         if command[0] == "useradd":
             self.existing_users.add(command[-1])
-            return _FakeCompletedProcess(0)
-        return _FakeCompletedProcess(0)
-
-
-class _FakeCompletedProcess:
-    def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.CompletedProcess(command, 0, "", "")
 
 
 def _write_config(tmp_path: Path) -> Path:
-    (tmp_path / ".direvo").mkdir()
-    config_path = tmp_path / ".direvo" / "config.yaml"
+    experiment_root = tmp_path / "experiment"
+    (experiment_root / ".direvo").mkdir(parents=True)
+    config_path = experiment_root / ".direvo" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
+            planner_root: "./planner"
+            workspace: "./workspace"
             parallel_trials: 2
             evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
+            implement_command: "echo noop"
             max_trials: 5
             max_wall_time: "1h"
             objective:
@@ -50,7 +47,7 @@ def _write_config(tmp_path: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (experiment_root / "evaluate.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     return config_path
 
 
@@ -63,7 +60,7 @@ def test_runtime_setup_creates_directories_without_root(
 
     RuntimeSetup(runner).prepare(config)
 
-    assert (tmp_path / "worktrees").is_dir()
+    assert (tmp_path / "experiment" / "planner" / "workspace" / "worktrees").is_dir()
     assert config.proposals_dir.is_dir()
     assert config.artifacts_dir.is_dir()
     assert runner.commands == []
@@ -73,7 +70,9 @@ def test_runtime_setup_creates_users_and_applies_permissions(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = load_config(_write_config(tmp_path))
-    git_dir = tmp_path / ".git"
+    config.workspace_root.mkdir(parents=True, exist_ok=True)
+    config.proposals_db.parent.mkdir(parents=True, exist_ok=True)
+    git_dir = config.workspace_root / ".git"
     git_dir.mkdir()
     (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     config.results_db.write_text("", encoding="utf-8")
@@ -96,9 +95,11 @@ def test_runtime_setup_creates_users_and_applies_permissions(
     assert ["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "planner"] in runner.commands
     assert ["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "trial-0"] in runner.commands
     assert ["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "trial-1"] in runner.commands
-    assert tmp_path.stat().st_mode & 0o777 == 0o751
-    assert (tmp_path / ".direvo").stat().st_mode & 0o777 == 0o750
-    assert (tmp_path / "worktrees").stat().st_mode & 0o777 == 0o755
+    assert config.experiment_root.stat().st_mode & 0o777 == 0o711
+    assert (config.experiment_root / ".direvo").stat().st_mode & 0o777 == 0o711
+    assert config.planner_root.stat().st_mode & 0o777 == 0o750
+    assert (config.planner_root / ".direvo").stat().st_mode & 0o777 == 0o750
+    assert (config.workspace_root / "worktrees").stat().st_mode & 0o777 == 0o755
     assert git_dir.stat().st_mode & 0o777 == 0o750
     assert config.proposals_dir.stat().st_mode & 0o777 == 0o770
     assert config.artifacts_dir.stat().st_mode & 0o777 == 0o750
@@ -112,7 +113,9 @@ def test_runtime_setup_tolerates_permission_denied_on_chown(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = load_config(_write_config(tmp_path))
-    git_dir = tmp_path / ".git"
+    config.workspace_root.mkdir(parents=True, exist_ok=True)
+    config.proposals_db.parent.mkdir(parents=True, exist_ok=True)
+    git_dir = config.workspace_root / ".git"
     git_dir.mkdir()
     (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     config.results_db.write_text("", encoding="utf-8")
@@ -123,6 +126,6 @@ def test_runtime_setup_tolerates_permission_denied_on_chown(
 
     RuntimeSetup(FakeRunner()).prepare(config)
 
-    assert (tmp_path / "worktrees").stat().st_mode & 0o777 == 0o755
+    assert (config.workspace_root / "worktrees").stat().st_mode & 0o777 == 0o755
     assert config.proposals_dir.is_dir()
     assert config.artifacts_dir.is_dir()

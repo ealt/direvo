@@ -25,24 +25,28 @@ class DatabaseManager:
     proposals_db: Path
     metrics_schema: dict[str, str]
     busy_timeout_ms: int
+    results_journal_mode: str = "DELETE"
+    proposals_journal_mode: str = "WAL"
 
     def initialize(self) -> None:
         """Initialize both SQLite databases."""
         self.results_db.parent.mkdir(parents=True, exist_ok=True)
         self.proposals_db.parent.mkdir(parents=True, exist_ok=True)
 
-        with self._connection(self.results_db) as conn:
+        with self._connection(self.results_db, self.results_journal_mode) as conn:
             conn.executescript(self._render_results_schema())
-        with self._connection(self.proposals_db) as conn:
+        with self._connection(self.proposals_db, self.proposals_journal_mode) as conn:
             conn.executescript(self._read_sql("proposals.sql"))
 
     def reserve_trial_id(self) -> int:
         """Reserve and return a new trial id."""
-        with self._connection(self.results_db) as conn:
+        with self._connection(self.results_db, self.results_journal_mode) as conn:
             cursor = conn.execute(
                 "INSERT INTO trials (status, timestamp) VALUES (?, datetime('now'))",
                 (TrialStatus.STARTING.value,),
             )
+            if cursor.lastrowid is None:
+                raise DatabaseError("Failed to reserve a trial id.")
             return int(cursor.lastrowid)
 
     def update_trial(self, update: TrialUpdate) -> None:
@@ -60,14 +64,14 @@ class DatabaseManager:
 
         assignments = ", ".join(f"{column} = ?" for column in fields)
         values = list(fields.values()) + [update.trial_id]
-        with self._connection(self.results_db) as conn:
+        with self._connection(self.results_db, self.results_journal_mode) as conn:
             cursor = conn.execute(f"UPDATE trials SET {assignments} WHERE trial_id = ?", values)
             if cursor.rowcount != 1:
                 raise DatabaseError(f"Unknown trial_id: {update.trial_id}")
 
     def claim_ready_proposal(self) -> ProposalClaim | None:
         """Atomically claim the highest-priority ready proposal."""
-        with self._connection(self.proposals_db) as conn:
+        with self._connection(self.proposals_db, self.proposals_journal_mode) as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 """
@@ -105,7 +109,7 @@ class DatabaseManager:
         status: ProposalStatus = ProposalStatus.DRAFTING,
     ) -> int:
         """Insert a proposal row for tests or planner bootstrap."""
-        with self._connection(self.proposals_db) as conn:
+        with self._connection(self.proposals_db, self.proposals_journal_mode) as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO proposals (priority, slug, parent_commits, artifacts_uri, status, created_at)
@@ -113,18 +117,20 @@ class DatabaseManager:
                 """,
                 (priority, slug, json.dumps(parent_commits), artifacts_uri, status.value),
             )
+            if cursor.lastrowid is None:
+                raise DatabaseError("Failed to create proposal.")
             return int(cursor.lastrowid)
 
     def list_trials(self) -> list[sqlite3.Row]:
         """Return all trials ordered by id."""
-        with self._connection(self.results_db) as conn:
+        with self._connection(self.results_db, self.results_journal_mode) as conn:
             return list(conn.execute("SELECT * FROM trials ORDER BY trial_id ASC"))
 
     def update_proposal_status(
         self, proposal_id: int, status: ProposalStatus, *, priority: float | None = None
     ) -> None:
         """Update proposal status, optionally overriding priority."""
-        with self._connection(self.proposals_db) as conn:
+        with self._connection(self.proposals_db, self.proposals_journal_mode) as conn:
             if priority is None:
                 cursor = conn.execute(
                     "UPDATE proposals SET status = ? WHERE id = ?",
@@ -140,12 +146,12 @@ class DatabaseManager:
 
     def get_trial_row(self, trial_id: int) -> sqlite3.Row | None:
         """Fetch a trial row by id."""
-        with self._connection(self.results_db) as conn:
+        with self._connection(self.results_db, self.results_journal_mode) as conn:
             return conn.execute("SELECT * FROM trials WHERE trial_id = ?", (trial_id,)).fetchone()
 
     def get_proposal_row(self, proposal_id: int) -> sqlite3.Row | None:
         """Fetch a proposal row by id."""
-        with self._connection(self.proposals_db) as conn:
+        with self._connection(self.proposals_db, self.proposals_journal_mode) as conn:
             return conn.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
 
     def objective_values(self, expression: str) -> list[float]:
@@ -157,7 +163,7 @@ class DatabaseManager:
               AND ({expression}) IS NOT NULL
             ORDER BY trial_id ASC
         """
-        with self._connection(self.results_db) as conn:
+        with self._connection(self.results_db, self.results_journal_mode) as conn:
             rows = conn.execute(
                 query,
                 (TrialStatus.SUCCESS.value, TrialStatus.EVAL_ERROR.value),
@@ -178,25 +184,25 @@ class DatabaseManager:
               AND ({condition})
             LIMIT 1
         """
-        with self._connection(self.results_db) as conn:
+        with self._connection(self.results_db, self.results_journal_mode) as conn:
             row = conn.execute(
                 query,
                 (TrialStatus.SUCCESS.value, TrialStatus.EVAL_ERROR.value),
             ).fetchone()
         return row is not None
 
-    def _connect(self, path: Path) -> sqlite3.Connection:
+    def _connect(self, path: Path, journal_mode: str) -> sqlite3.Connection:
         """Create a configured SQLite connection."""
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(f"PRAGMA journal_mode={journal_mode}")
         conn.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
         return conn
 
     @contextmanager
-    def _connection(self, path: Path) -> Iterator[sqlite3.Connection]:
+    def _connection(self, path: Path, journal_mode: str) -> Iterator[sqlite3.Connection]:
         """Yield a configured SQLite connection and always close it."""
-        conn = self._connect(path)
+        conn = self._connect(path, journal_mode)
         try:
             yield conn
             conn.commit()

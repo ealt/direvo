@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +13,7 @@ class JsonFormatter(logging.Formatter):
     """Render log records as JSON objects."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Render a single log record as JSON."""
         payload = {
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname.lower(),
@@ -33,6 +34,7 @@ def configure_logging(log_path: Path, *, session_id: str | None = None) -> loggi
 
     Args:
         log_path: Destination for the session log file.
+        session_id: Optional session identifier to include in emitted events.
 
     Returns:
         Configured project logger.
@@ -54,7 +56,7 @@ def configure_logging(log_path: Path, *, session_id: str | None = None) -> loggi
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    setattr(logger, "session_id", session_id or uuid4().hex)
+    logger.session_id = session_id or uuid4().hex  # type: ignore[attr-defined]
 
     return logger
 

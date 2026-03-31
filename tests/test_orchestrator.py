@@ -6,14 +6,15 @@ from pathlib import Path
 
 from direvo.config import load_config
 from direvo.db import DatabaseManager
-from direvo.execution import EvaluationResult, ExecutionResult
+from direvo.execution import EvaluationResult, ImplementationManager, ImplementationResult
 from direvo.git_manager import GitManager
 from direvo.logging import configure_logging
 from direvo.models import ProposalStatus
 from direvo.orchestrator import Orchestrator
+from direvo.planner import PlannerSession
 
 
-class FakePlannerSession:
+class FakePlannerSession(PlannerSession):
     def __init__(self) -> None:
         self.started = False
         self.stopped = False
@@ -41,12 +42,13 @@ class RaisingPlannerSession(FakePlannerSession):
         raise RuntimeError("planner unavailable")
 
 
-class FakeExecutionManager:
+class FakeImplementationManager(ImplementationManager):
     def __init__(self, *, execution_success: bool = True, evaluation_success: bool = True) -> None:
+        super().__init__(implement_command="echo noop")
         self.execution_success = execution_success
         self.evaluation_success = evaluation_success
 
-    def run_execution(
+    def run_implementation(
         self,
         *,
         worktree_path: Path,
@@ -55,12 +57,12 @@ class FakeExecutionManager:
         user: str | None = None,
         slug: str = "",
         trial_id: int = 0,
-    ) -> ExecutionResult:
+    ) -> ImplementationResult:
         (worktree_path / "code.txt").write_text("changed\n", encoding="utf-8")
         trial_dir = worktree_path / ".direvo" / "trial"
         trial_dir.mkdir(parents=True, exist_ok=True)
         (trial_dir / "implementation.md").write_text(slug, encoding="utf-8")
-        return ExecutionResult(
+        return ImplementationResult(
             success=self.execution_success,
             stdout="",
             stderr="",
@@ -82,7 +84,7 @@ class FakeExecutionManager:
         )
 
 
-class SlowExecutionManager(FakeExecutionManager):
+class SlowImplementationManager(FakeImplementationManager):
     def __init__(self, delay_sec: float) -> None:
         super().__init__()
         self.delay_sec = delay_sec
@@ -90,7 +92,7 @@ class SlowExecutionManager(FakeExecutionManager):
         self._active = 0
         self.max_active = 0
 
-    def run_execution(
+    def run_implementation(
         self,
         *,
         worktree_path: Path,
@@ -99,13 +101,13 @@ class SlowExecutionManager(FakeExecutionManager):
         user: str | None = None,
         slug: str = "",
         trial_id: int = 0,
-    ) -> ExecutionResult:
+    ) -> ImplementationResult:
         with self._lock:
             self._active += 1
             self.max_active = max(self.max_active, self._active)
         try:
             time.sleep(self.delay_sec)
-            return super().run_execution(
+            return super().run_implementation(
                 worktree_path=worktree_path,
                 slot=slot,
                 timeout_sec=timeout_sec,
@@ -118,12 +120,12 @@ class SlowExecutionManager(FakeExecutionManager):
                 self._active -= 1
 
 
-class InterruptibleExecutionManager(SlowExecutionManager):
+class InterruptibleImplementationManager(SlowImplementationManager):
     def __init__(self, delay_sec: float) -> None:
         super().__init__(delay_sec=delay_sec)
         self.started = threading.Event()
 
-    def run_execution(
+    def run_implementation(
         self,
         *,
         worktree_path: Path,
@@ -132,9 +134,9 @@ class InterruptibleExecutionManager(SlowExecutionManager):
         user: str | None = None,
         slug: str = "",
         trial_id: int = 0,
-    ) -> ExecutionResult:
+    ) -> ImplementationResult:
         self.started.set()
-        return super().run_execution(
+        return super().run_implementation(
             worktree_path=worktree_path,
             slot=slot,
             timeout_sec=timeout_sec,
@@ -144,8 +146,8 @@ class InterruptibleExecutionManager(SlowExecutionManager):
         )
 
 
-class MergeResolvingExecutionManager(FakeExecutionManager):
-    def run_execution(
+class MergeResolvingImplementationManager(FakeImplementationManager):
+    def run_implementation(
         self,
         *,
         worktree_path: Path,
@@ -154,9 +156,9 @@ class MergeResolvingExecutionManager(FakeExecutionManager):
         user: str | None = None,
         slug: str = "",
         trial_id: int = 0,
-    ) -> ExecutionResult:
+    ) -> ImplementationResult:
         (worktree_path / "tracked.txt").write_text("resolved\n", encoding="utf-8")
-        return super().run_execution(
+        return super().run_implementation(
             worktree_path=worktree_path,
             slot=slot,
             timeout_sec=timeout_sec,
@@ -179,48 +181,72 @@ def _current_branch(cwd: Path) -> str:
     ).stdout.strip()
 
 
-def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "worktrees").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+def _init_experiment(tmp_path: Path, *, tracked_contents: str = "seed\n") -> tuple[Path, Path]:
+    experiment_root = tmp_path / "experiment"
+    workspace = experiment_root / "planner" / "workspace"
+    (experiment_root / ".direvo").mkdir(parents=True)
+    workspace.mkdir(parents=True)
+    (workspace / "tracked.txt").write_text(tracked_contents, encoding="utf-8")
+    eval_script = experiment_root / "evaluate.sh"
+    eval_script.write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
+    eval_script.chmod(0o755)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+    _run(["git", "init"], cwd=workspace)
+    _run(["git", "config", "user.email", "test@example.com"], cwd=workspace)
+    _run(["git", "config", "user.name", "Test User"], cwd=workspace)
+    _run(["git", "add", "."], cwd=workspace)
+    _run(["git", "commit", "-m", "seed"], cwd=workspace)
+    return experiment_root, workspace
+
+
+def _head_sha(workspace: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"],
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
 
-    config_path = tmp_path / ".direvo" / "config.yaml"
+
+def _write_config(experiment_root: Path, body: str) -> Path:
+    config_path = experiment_root / ".direvo" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 5
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
+            planner_root: "./planner"
+            workspace: "./workspace"
             """
-        ),
+        )
+        + textwrap.dedent(body),
         encoding="utf-8",
     )
-    proposal_dir = tmp_path / ".direvo" / "proposals" / "proposal-1"
-    proposal_dir.mkdir(parents=True)
-    (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
+    return config_path
+
+
+def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
+
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 5
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
+    )
 
     config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
+    proposal_dir.mkdir(parents=True)
+    (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -237,13 +263,13 @@ def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(),
+        execution_manager=FakeImplementationManager(),
         planner_session=planner,
     )
 
@@ -263,51 +289,34 @@ def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
     proposal_row = database_manager.get_proposal_row(proposal_id)
     assert proposal_row is not None
     assert proposal_row["status"] == "completed"
-    assert (tmp_path / ".direvo" / "artifacts" / "trial-1" / "plan.md").exists()
-    assert not (tmp_path / "worktrees" / "wt-0").exists()
+    assert (experiment_root / ".direvo" / "artifacts" / "trial-1" / "plan.md").exists()
+    assert not (config.workspace_root / "worktrees" / "wt-0").exists()
 
 
 def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 5
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 5
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_dir = tmp_path / ".direvo" / "proposals" / "proposal-1"
-    proposal_dir.mkdir(parents=True)
-    (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
 
     config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
+    proposal_dir.mkdir(parents=True)
+    (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -324,13 +333,13 @@ def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> 
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(execution_success=False),
+        execution_manager=FakeImplementationManager(execution_success=False),
         planner_session=planner,
     )
 
@@ -346,50 +355,33 @@ def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> 
     assert proposal_row["status"] == "ready"
     assert proposal_row["priority"] == 0.9
     assert planner.completed == []
-    assert not (tmp_path / "worktrees" / "wt-0").exists()
+    assert not (config.workspace_root / "worktrees" / "wt-0").exists()
 
 
 def test_orchestrator_records_eval_error_but_keeps_commit(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 5
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 5
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_dir = tmp_path / ".direvo" / "proposals" / "proposal-1"
-    proposal_dir.mkdir(parents=True)
-    (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
 
     config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
+    proposal_dir.mkdir(parents=True)
+    (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -406,13 +398,13 @@ def test_orchestrator_records_eval_error_but_keeps_commit(tmp_path: Path) -> Non
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(evaluation_success=False),
+        execution_manager=FakeImplementationManager(evaluation_success=False),
         planner_session=planner,
     )
 
@@ -426,71 +418,49 @@ def test_orchestrator_records_eval_error_but_keeps_commit(tmp_path: Path) -> Non
     proposal_row = database_manager.get_proposal_row(proposal_id)
     assert proposal_row is not None
     assert proposal_row["status"] == "completed"
-    assert (tmp_path / ".direvo" / "artifacts" / "trial-1" / "plan.md").exists()
+    assert (experiment_root / ".direvo" / "artifacts" / "trial-1" / "plan.md").exists()
 
 
 def test_orchestrator_creates_merge_trial_commit(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    tracked = tmp_path / "tracked.txt"
-    tracked.write_text("base\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path, tracked_contents="base\n")
+    tracked = workspace / "tracked.txt"
+    base_branch = _current_branch(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    base_branch = _current_branch(tmp_path)
-
-    _run(["git", "checkout", "-b", "left"], cwd=tmp_path)
+    _run(["git", "checkout", "-b", "left"], cwd=workspace)
     tracked.write_text("left\n", encoding="utf-8")
-    _run(["git", "add", "tracked.txt"], cwd=tmp_path)
-    _run(["git", "commit", "-m", "left"], cwd=tmp_path)
-    left_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+    _run(["git", "add", "tracked.txt"], cwd=workspace)
+    _run(["git", "commit", "-m", "left"], cwd=workspace)
+    left_sha = _head_sha(workspace)
 
-    _run(["git", "checkout", base_branch], cwd=tmp_path)
-    _run(["git", "checkout", "-b", "right"], cwd=tmp_path)
+    _run(["git", "checkout", base_branch], cwd=workspace)
+    _run(["git", "checkout", "-b", "right"], cwd=workspace)
     tracked.write_text("right\n", encoding="utf-8")
-    _run(["git", "add", "tracked.txt"], cwd=tmp_path)
-    _run(["git", "commit", "-m", "right"], cwd=tmp_path)
-    right_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+    _run(["git", "add", "tracked.txt"], cwd=workspace)
+    _run(["git", "commit", "-m", "right"], cwd=workspace)
+    right_sha = _head_sha(workspace)
 
-    _run(["git", "checkout", base_branch], cwd=tmp_path)
+    _run(["git", "checkout", base_branch], cwd=workspace)
 
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 1
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 1
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_dir = tmp_path / ".direvo" / "proposals" / "proposal-1"
-    proposal_dir.mkdir(parents=True)
-    (proposal_dir / "plan.md").write_text("Merge the two approaches.\n", encoding="utf-8")
 
     config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
+    proposal_dir.mkdir(parents=True)
+    (proposal_dir / "plan.md").write_text("Merge the two approaches.\n", encoding="utf-8")
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -507,13 +477,13 @@ def test_orchestrator_creates_merge_trial_commit(tmp_path: Path) -> None:
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=MergeResolvingExecutionManager(),
+        execution_manager=MergeResolvingImplementationManager(),
         planner_session=planner,
     )
 
@@ -526,7 +496,7 @@ def test_orchestrator_creates_merge_trial_commit(tmp_path: Path) -> None:
     merge_commit = trial_row["commit_sha"]
     assert merge_commit
     parent_line = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-list", "--parents", "-n", "1", merge_commit],
+        ["git", "-C", str(workspace), "rev-list", "--parents", "-n", "1", merge_commit],
         check=True,
         capture_output=True,
         text=True,
@@ -538,50 +508,32 @@ def test_orchestrator_creates_merge_trial_commit(tmp_path: Path) -> None:
 
 
 def test_orchestrator_processes_multiple_slots_concurrently(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 2
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 5
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 2
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 5
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_root = tmp_path / ".direvo" / "proposals"
+    config = load_config(config_path)
+    proposal_root = config.proposals_dir
     proposal_one = proposal_root / "proposal-1"
     proposal_two = proposal_root / "proposal-2"
     proposal_one.mkdir(parents=True)
     proposal_two.mkdir(parents=True)
     (proposal_one / "plan.md").write_text("Implement the first change.\n", encoding="utf-8")
     (proposal_two / "plan.md").write_text("Implement the second change.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -605,8 +557,8 @@ def test_orchestrator_processes_multiple_slots_concurrently(tmp_path: Path) -> N
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
-    execution_manager = SlowExecutionManager(delay_sec=0.2)
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    execution_manager = SlowImplementationManager(delay_sec=0.2)
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -624,49 +576,31 @@ def test_orchestrator_processes_multiple_slots_concurrently(tmp_path: Path) -> N
 
 
 def test_orchestrator_stops_when_target_condition_is_met(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 5
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            target_condition: "test_pass_rate >= 1.0"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 5
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        target_condition: "test_pass_rate >= 1.0"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_root = tmp_path / ".direvo" / "proposals"
+    config = load_config(config_path)
+    proposal_root = config.proposals_dir
     for index, slug in enumerate(("first", "second"), start=1):
         proposal_dir = proposal_root / f"proposal-{index}"
         proposal_dir.mkdir(parents=True)
         (proposal_dir / "plan.md").write_text(f"Implement {slug}.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -690,13 +624,13 @@ def test_orchestrator_stops_when_target_condition_is_met(tmp_path: Path) -> None
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(),
+        execution_manager=FakeImplementationManager(),
         planner_session=planner,
     )
 
@@ -709,48 +643,30 @@ def test_orchestrator_stops_when_target_condition_is_met(tmp_path: Path) -> None
 
 
 def test_orchestrator_drains_in_flight_trial_after_stop_request(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 5
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 5
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_root = tmp_path / ".direvo" / "proposals"
+    config = load_config(config_path)
+    proposal_root = config.proposals_dir
     for index, slug in enumerate(("first", "second"), start=1):
         proposal_dir = proposal_root / f"proposal-{index}"
         proposal_dir.mkdir(parents=True)
         (proposal_dir / "plan.md").write_text(f"Implement {slug}.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -774,8 +690,8 @@ def test_orchestrator_drains_in_flight_trial_after_stop_request(tmp_path: Path) 
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
-    execution_manager = InterruptibleExecutionManager(delay_sec=0.2)
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    execution_manager = InterruptibleImplementationManager(delay_sec=0.2)
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -810,46 +726,28 @@ def test_orchestrator_drains_in_flight_trial_after_stop_request(tmp_path: Path) 
 
 
 def test_recovery_requires_clean_worktree_state(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 5
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 5
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_dir = tmp_path / ".direvo" / "proposals" / "proposal-1"
+    config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
     proposal_dir.mkdir(parents=True)
     (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -866,13 +764,13 @@ def test_recovery_requires_clean_worktree_state(tmp_path: Path) -> None:
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(execution_success=False),
+        execution_manager=FakeImplementationManager(execution_success=False),
         planner_session=planner,
     )
 
@@ -886,7 +784,7 @@ def test_recovery_requires_clean_worktree_state(tmp_path: Path) -> None:
             injected_dirty_state["done"] = True
         original_require_clean(repo_path)
 
-    orchestrator.git_manager.require_clean_status = fail_require_clean  # type: ignore[method-assign]
+    orchestrator.git_manager.require_clean_status = fail_require_clean
 
     processed = orchestrator.run()
 
@@ -901,47 +799,29 @@ def test_recovery_requires_clean_worktree_state(tmp_path: Path) -> None:
 
 
 def test_orchestrator_waits_for_late_ready_proposal(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            plan_command: "planner"
-            max_trials: 1
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        plan_command: "planner"
+        max_trials: 1
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_dir = tmp_path / ".direvo" / "proposals" / "proposal-1"
+    config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
     proposal_dir.mkdir(parents=True)
     (proposal_dir / "plan.md").write_text("Implement the delayed change.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -951,13 +831,13 @@ def test_orchestrator_waits_for_late_ready_proposal(tmp_path: Path) -> None:
     database_manager.initialize()
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(),
+        execution_manager=FakeImplementationManager(),
         planner_session=planner,
         idle_poll_interval_sec=0.05,
     )
@@ -994,46 +874,28 @@ def test_orchestrator_waits_for_late_ready_proposal(tmp_path: Path) -> None:
 
 
 def test_orchestrator_remaps_absolute_proposal_paths_to_experiment_root(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 1
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 1
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_dir = tmp_path / ".direvo" / "proposals" / "proposal-1"
+    config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
     proposal_dir.mkdir(parents=True)
     (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -1050,13 +912,13 @@ def test_orchestrator_remaps_absolute_proposal_paths_to_experiment_root(tmp_path
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(),
+        execution_manager=FakeImplementationManager(),
         planner_session=planner,
     )
 
@@ -1069,46 +931,28 @@ def test_orchestrator_remaps_absolute_proposal_paths_to_experiment_root(tmp_path
 
 
 def test_orchestrator_completes_invalid_proposal_without_trial(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 5
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 5
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    invalid_docs = tmp_path / ".direvo" / "proposals" / "proposal-1"
+    config = load_config(config_path)
+    invalid_docs = config.proposals_dir / "proposal-1"
     invalid_docs.mkdir(parents=True)
     (invalid_docs / "plan.md").write_text("Broken proposal.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -1125,13 +969,13 @@ def test_orchestrator_completes_invalid_proposal_without_trial(tmp_path: Path) -
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(),
+        execution_manager=FakeImplementationManager(),
         planner_session=planner,
     )
 
@@ -1147,46 +991,28 @@ def test_orchestrator_completes_invalid_proposal_without_trial(tmp_path: Path) -
 
 
 def test_trial_completion_survives_planner_notification_failure(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 1
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 1
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    proposal_dir = tmp_path / ".direvo" / "proposals" / "proposal-1"
+    config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
     proposal_dir.mkdir(parents=True)
     (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -1202,13 +1028,13 @@ def test_trial_completion_survives_planner_notification_failure(tmp_path: Path) 
         status=ProposalStatus.READY,
     )
 
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(),
+        execution_manager=FakeImplementationManager(),
         planner_session=RaisingPlannerSession(),
     )
 
@@ -1224,46 +1050,28 @@ def test_trial_completion_survives_planner_notification_failure(tmp_path: Path) 
 
 
 def test_invalid_proposal_survives_planner_error_notification_failure(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").write_text("#!/bin/sh\necho '{\"test_pass_rate\": 1.0}'\n", encoding="utf-8")
-    (tmp_path / "evaluate.sh").chmod(0o755)
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    config_path = tmp_path / ".direvo" / "config.yaml"
-    config_path.write_text(
-        textwrap.dedent(
-            """
-            parallel_trials: 1
-            evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
-            max_trials: 5
-            max_wall_time: "1h"
-            objective:
-              expr: "test_pass_rate"
-              direction: "maximize"
-            metrics_schema:
-              test_pass_rate: real
-            """
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 5
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
     )
-    invalid_docs = tmp_path / ".direvo" / "proposals" / "proposal-1"
+    config = load_config(config_path)
+    invalid_docs = config.proposals_dir / "proposal-1"
     invalid_docs.mkdir(parents=True)
     (invalid_docs / "plan.md").write_text("Broken proposal.\n", encoding="utf-8")
-
-    config = load_config(config_path)
     database_manager = DatabaseManager(
         results_db=config.results_db,
         proposals_db=config.proposals_db,
@@ -1279,13 +1087,13 @@ def test_invalid_proposal_survives_planner_error_notification_failure(tmp_path: 
         status=ProposalStatus.READY,
     )
 
-    logger = configure_logging(tmp_path / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".direvo" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
         logger,
         git_manager=GitManager(config.workspace_root),
-        execution_manager=FakeExecutionManager(),
+        execution_manager=FakeImplementationManager(),
         planner_session=RaisingPlannerSession(),
     )
 

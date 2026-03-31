@@ -10,7 +10,7 @@ from string import Formatter
 
 import yaml
 
-from .models import ObjectiveDirection, ObjectiveSpec, SessionConfig
+from .models import FilePermissionGrant, ObjectiveDirection, ObjectiveSpec, SessionConfig
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _DURATION_RE = re.compile(r"^(?P<value>\d+)(?P<unit>[smhd])$")
@@ -49,16 +49,22 @@ def load_config(config_path: str | Path) -> SessionConfig:
         raise ConfigError("Config root must be a mapping.")
 
     experiment_root = _infer_experiment_root(path)
-    workspace_root = _resolve_path(
-        experiment_root, _string_default(raw, "workspace", ".")
+    planner_root = _resolve_path(experiment_root, _require_str(raw, "planner_root"))
+    workspace_root = _resolve_path(planner_root, _string_default(raw, "workspace", "workspace"))
+    _validate_containment(
+        experiment_root=experiment_root,
+        planner_root=planner_root,
+        workspace_root=workspace_root,
     )
     metrics_schema = _validate_metrics_schema(raw.get("metrics_schema"))
     objective = _validate_objective(raw.get("objective"))
+    file_permissions = _validate_file_permissions(experiment_root, raw.get("file_permissions", []))
 
     convergence_window = raw.get("convergence_window")
-    if convergence_window is not None:
-        if not isinstance(convergence_window, int) or convergence_window <= 0:
-            raise ConfigError("convergence_window must be a positive integer.")
+    if convergence_window is not None and (
+        not isinstance(convergence_window, int) or convergence_window <= 0
+    ):
+        raise ConfigError("convergence_window must be a positive integer.")
 
     target_condition = raw.get("target_condition")
     if target_condition is not None and not isinstance(target_condition, str):
@@ -80,6 +86,7 @@ def load_config(config_path: str | Path) -> SessionConfig:
     return SessionConfig(
         config_path=path,
         experiment_root=experiment_root,
+        planner_root=planner_root,
         workspace_root=workspace_root,
         parallel_trials=_require_positive_int(raw, "parallel_trials"),
         evaluate_command=_resolve_command(
@@ -95,27 +102,28 @@ def load_config(config_path: str | Path) -> SessionConfig:
             experiment_root, raw.get("results_db", ".direvo/results.db")
         ),
         proposals_db=_resolve_path(
-            experiment_root, raw.get("proposals_db", ".direvo/proposals.db")
+            planner_root, raw.get("proposals_db", ".direvo/proposals.db")
         ),
         proposals_dir=_resolve_path(
-            experiment_root, raw.get("proposals_dir", ".direvo/proposals")
+            planner_root, raw.get("proposals_dir", ".direvo/proposals")
         ),
         artifacts_dir=_resolve_path(
             experiment_root, raw.get("artifacts_dir", ".direvo/artifacts")
         ),
-        execute_command=_resolve_command(
+        implement_command=_resolve_command(
             experiment_root,
-            _validate_execute_command(raw.get("execute_command")),
+            _validate_implement_command(raw.get("implement_command")),
         ),
         plan_command=_resolve_command_optional(
-            experiment_root, _optional_str(raw, "plan_command")
+            planner_root, _optional_str(raw, "plan_command")
         ),
+        file_permissions=file_permissions,
         plan_notify_template=plan_notify_template,
         plan_start_timeout_sec=_positive_int_default(
             raw, "plan_start_timeout_sec", 60
         ),
-        execution_timeout_sec=_positive_int_default(
-            raw, "execution_timeout_sec", 1800
+        implement_timeout_sec=_positive_int_default(
+            raw, "implement_timeout_sec", 1800
         ),
         evaluation_timeout_sec=_positive_int_default(
             raw, "evaluation_timeout_sec", 1800
@@ -167,6 +175,56 @@ def _resolve_command_optional(experiment_root: Path, command: str | None) -> str
     if command is None:
         return None
     return _resolve_command(experiment_root, command)
+
+
+def _validate_containment(
+    *, experiment_root: Path, planner_root: Path, workspace_root: Path
+) -> None:
+    """Ensure configured roots follow the ownership hierarchy."""
+    if planner_root == experiment_root or experiment_root not in planner_root.parents:
+        raise ConfigError("planner_root must be under experiment_root.")
+    if workspace_root == planner_root or planner_root not in workspace_root.parents:
+        raise ConfigError("workspace must be under planner_root.")
+
+
+def _validate_file_permissions(
+    experiment_root: Path, value: object
+) -> tuple[FilePermissionGrant, ...]:
+    """Validate read-only cross-scope file grants."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ConfigError("file_permissions must be a list when provided.")
+
+    grants: list[FilePermissionGrant] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ConfigError("file_permissions entries must be mappings.")
+        path = entry.get("path")
+        grant = entry.get("grant")
+        if not isinstance(path, str) or not path.strip():
+            raise ConfigError("file_permissions path must be a non-empty string.")
+        if not isinstance(grant, str) or grant not in {"planner", "implementer"}:
+            raise ConfigError('file_permissions grant must be "planner" or "implementer".')
+
+        normalized = Path(path.strip())
+        if normalized.is_absolute():
+            raise ConfigError("file_permissions path must be relative to experiment_root.")
+        if ".." in normalized.parts:
+            raise ConfigError("file_permissions path must not contain '..'.")
+        if not normalized.parts:
+            raise ConfigError("file_permissions path must not be empty.")
+        if normalized.parts[0] == ".direvo":
+            raise ConfigError("file_permissions path must not target .direvo.")
+
+        source = (experiment_root / normalized).resolve()
+        if experiment_root not in source.parents:
+            raise ConfigError("file_permissions path escapes experiment_root.")
+        if not source.exists() or not source.is_file():
+            raise ConfigError(f"file_permissions path does not reference an existing file: {path}")
+
+        grants.append(FilePermissionGrant(path=normalized.as_posix(), actor=grant))
+    return tuple(grants)
 
 
 def _require_str(data: dict[str, object], key: str) -> str:
@@ -261,10 +319,10 @@ def _parse_duration(value: str) -> int:
     return int(match.group("value")) * scale
 
 
-def _validate_execute_command(value: object) -> str:
+def _validate_implement_command(value: object) -> str:
     """Validate the execute command template."""
     if not isinstance(value, str) or not value.strip():
-        raise ConfigError("execute_command must be a non-empty string.")
+        raise ConfigError("implement_command must be a non-empty string.")
     return value.strip()
 
 

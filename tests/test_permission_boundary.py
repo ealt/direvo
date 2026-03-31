@@ -11,7 +11,6 @@ from direvo.git_manager import GitManager
 from direvo.runtime import RuntimeSetup
 from direvo.worktree import secure_worktree_root
 
-
 if os.geteuid() != 0 or os.environ.get("DIREVO_RUN_PRIVILEGED_TESTS") != "1":
     pytestmark = pytest.mark.skip(
         reason="requires root in an ephemeral environment and DIREVO_RUN_PRIVILEGED_TESTS=1"
@@ -32,25 +31,30 @@ def _su_status(user: str, command: str) -> int:
 
 
 def test_runtime_enforces_permission_boundaries(tmp_path: Path) -> None:
-    (tmp_path / ".direvo").mkdir()
-    (tmp_path / "tracked.txt").write_text("seed\n", encoding="utf-8")
-    eval_script = tmp_path / "evaluate.sh"
+    experiment_root = tmp_path / "experiment"
+    workspace = experiment_root / "planner" / "workspace"
+    (experiment_root / ".direvo").mkdir(parents=True)
+    workspace.mkdir(parents=True)
+    (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
+    eval_script = experiment_root / "evaluate.sh"
     eval_script.write_text("#!/bin/sh\nprintf '{\"test_pass_rate\": 1.0}\\n'\n", encoding="utf-8")
     eval_script.chmod(0o755)
 
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    _run(["git", "add", "."], cwd=tmp_path)
-    _run(["git", "commit", "-m", "seed"], cwd=tmp_path)
+    _run(["git", "init"], cwd=workspace)
+    _run(["git", "config", "user.email", "test@example.com"], cwd=workspace)
+    _run(["git", "config", "user.name", "Test User"], cwd=workspace)
+    _run(["git", "add", "."], cwd=workspace)
+    _run(["git", "commit", "-m", "seed"], cwd=workspace)
 
-    config_path = tmp_path / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".direvo" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
+            planner_root: "./planner"
+            workspace: "./workspace"
             parallel_trials: 2
             evaluate_command: "./evaluate.sh"
-            execute_command: "echo noop"
+            implement_command: "echo noop"
             max_trials: 1
             max_wall_time: "1h"
             objective:
@@ -85,11 +89,12 @@ def test_runtime_enforces_permission_boundaries(tmp_path: Path) -> None:
     assert (config.results_db.stat().st_mode & 0o777) == 0o640
     assert (config.proposals_db.stat().st_mode & 0o777) == 0o660
 
-    assert _su_status("planner", f"test -r {tmp_path / '.git' / 'HEAD'}") == 0
+    assert _su_status("planner", f"test -r {config.workspace_root / '.git' / 'HEAD'}") == 0
     assert _su_status("planner", f"test -r {config.results_db}") == 0
     assert _su_status("planner", f"test -w {config.proposals_db}") == 0
 
     assert _su_status("trial-0", f"test -r {worktree_zero / 'tracked.txt'}") == 0
-    assert _su_status("trial-0", f"test -r {tmp_path / '.git' / 'HEAD'}") != 0
+    assert _su_status("trial-0", f"test -r {config.workspace_root / '.git' / 'HEAD'}") != 0
     assert _su_status("trial-0", f"test -r {config.results_db}") != 0
     assert _su_status("trial-0", f"ls {worktree_one}") != 0
+    assert _su_status("trial-0", f"ls {config.planner_root}") != 0
