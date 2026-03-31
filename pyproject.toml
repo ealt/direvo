@@ -22,6 +22,7 @@ dev = [
 
 [project.scripts]
 direvo = "direvo.cli:main"
+eden = "direvo.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
