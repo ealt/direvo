@@ -1,9 +1,9 @@
 import tempfile
 from pathlib import Path
 
-from direvo.db import DatabaseManager
-from direvo.models import ObjectiveDirection, TrialStatus, TrialUpdate
-from direvo.termination import has_converged, should_terminate
+from eden.db import DatabaseManager
+from eden.models import ObjectiveDirection, TrialStatus, TrialUpdate
+from eden.termination import has_converged, should_terminate
 
 
 def test_maximize_convergence() -> None:

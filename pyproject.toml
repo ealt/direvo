@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "direvo"
+name = "eden"
 version = "0.1.0"
-description = "DirEvo orchestrator bootstrap and coordination core"
+description = "EDEN orchestration engine for directed code evolution"
 readme = "docs/plans/v0.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -22,8 +22,7 @@ dev = [
 ]
 
 [project.scripts]
-direvo = "direvo.cli:main"
-eden = "direvo.cli:main"
+eden = "eden.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -32,7 +31,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-direvo = ["sql/*.sql"]
+eden = ["sql/*.sql"]
 
 [tool.ruff]
 line-length = 120

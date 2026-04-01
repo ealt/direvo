@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from direvo.config import load_config
-from direvo.db import DatabaseManager
-from direvo.execution import EvaluationResult, ImplementationManager, ImplementationResult
-from direvo.git_manager import GitManager
-from direvo.logging import configure_logging
-from direvo.models import ProposalStatus
-from direvo.orchestrator import Orchestrator, bootstrap
-from direvo.planner import PlannerSession
+from eden.config import load_config
+from eden.db import DatabaseManager
+from eden.execution import EvaluationResult, ImplementationManager, ImplementationResult
+from eden.git_manager import GitManager
+from eden.logging import configure_logging
+from eden.models import ProposalStatus
+from eden.orchestrator import Orchestrator, bootstrap
+from eden.planner import PlannerSession
 
 
 class FakePlannerSession(PlannerSession):
@@ -62,7 +62,7 @@ class FakeImplementationManager(ImplementationManager):
         trial_id: int = 0,
     ) -> ImplementationResult:
         (worktree_path / "code.txt").write_text("changed\n", encoding="utf-8")
-        trial_dir = worktree_path / ".direvo" / "trial"
+        trial_dir = worktree_path / ".eden" / "trial"
         trial_dir.mkdir(parents=True, exist_ok=True)
         (trial_dir / "implementation.md").write_text(slug, encoding="utf-8")
         return ImplementationResult(
@@ -75,7 +75,7 @@ class FakeImplementationManager(ImplementationManager):
     def run_evaluation(
         self, *, worktree_path: Path, evaluate_command: str, timeout_sec: int, user: str | None = None
     ) -> EvaluationResult:
-        trial_dir = worktree_path / ".direvo" / "trial"
+        trial_dir = worktree_path / ".eden" / "trial"
         trial_dir.mkdir(parents=True, exist_ok=True)
         (trial_dir / "results.md").write_text("ok\n", encoding="utf-8")
         return EvaluationResult(
@@ -187,7 +187,7 @@ def _current_branch(cwd: Path) -> str:
 def _init_experiment(tmp_path: Path, *, tracked_contents: str = "seed\n") -> tuple[Path, Path]:
     experiment_root = tmp_path / "experiment"
     workspace = experiment_root / "planner" / "workspace"
-    (experiment_root / ".direvo").mkdir(parents=True)
+    (experiment_root / ".eden").mkdir(parents=True)
     workspace.mkdir(parents=True)
     (workspace / "tracked.txt").write_text(tracked_contents, encoding="utf-8")
     eval_script = experiment_root / "evaluate.sh"
@@ -212,7 +212,7 @@ def _head_sha(workspace: Path) -> str:
 
 
 def _write_config(experiment_root: Path, body: str) -> Path:
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".eden" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -266,7 +266,7 @@ def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -292,7 +292,7 @@ def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
     proposal_row = database_manager.get_proposal_row(proposal_id)
     assert proposal_row is not None
     assert proposal_row["status"] == "completed"
-    assert (experiment_root / ".direvo" / "artifacts" / "trial-1" / "plan.md").exists()
+    assert (experiment_root / ".eden" / "artifacts" / "trial-1" / "plan.md").exists()
     assert not (config.workspace_root / "worktrees" / "wt-0").exists()
     assert orchestrator.wall_time_seconds >= 0
 
@@ -460,7 +460,7 @@ def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> 
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -532,7 +532,7 @@ def test_orchestrator_records_eval_error_but_keeps_commit(tmp_path: Path) -> Non
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -552,7 +552,7 @@ def test_orchestrator_records_eval_error_but_keeps_commit(tmp_path: Path) -> Non
     proposal_row = database_manager.get_proposal_row(proposal_id)
     assert proposal_row is not None
     assert proposal_row["status"] == "completed"
-    assert (experiment_root / ".direvo" / "artifacts" / "trial-1" / "plan.md").exists()
+    assert (experiment_root / ".eden" / "artifacts" / "trial-1" / "plan.md").exists()
 
 
 def test_orchestrator_creates_merge_trial_commit(tmp_path: Path) -> None:
@@ -611,7 +611,7 @@ def test_orchestrator_creates_merge_trial_commit(tmp_path: Path) -> None:
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -691,7 +691,7 @@ def test_orchestrator_processes_multiple_slots_concurrently(tmp_path: Path) -> N
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     execution_manager = SlowImplementationManager(delay_sec=0.2)
     orchestrator = Orchestrator(
         config,
@@ -758,7 +758,7 @@ def test_orchestrator_stops_when_target_condition_is_met(tmp_path: Path) -> None
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -824,7 +824,7 @@ def test_orchestrator_drains_in_flight_trial_after_stop_request(tmp_path: Path) 
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     execution_manager = InterruptibleImplementationManager(delay_sec=0.2)
     orchestrator = Orchestrator(
         config,
@@ -898,7 +898,7 @@ def test_recovery_requires_clean_worktree_state(tmp_path: Path) -> None:
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -965,7 +965,7 @@ def test_orchestrator_waits_for_late_ready_proposal(tmp_path: Path) -> None:
     database_manager.initialize()
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -1041,12 +1041,12 @@ def test_orchestrator_remaps_absolute_proposal_paths_to_experiment_root(tmp_path
         priority=1.0,
         slug="portable-path",
         parent_commits=[head_sha],
-        artifacts_uri=f"/host/workspace/.direvo/proposals/{proposal_dir.name}",
+        artifacts_uri=f"/host/workspace/.eden/proposals/{proposal_dir.name}",
         status=ProposalStatus.READY,
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -1103,7 +1103,7 @@ def test_orchestrator_completes_invalid_proposal_without_trial(tmp_path: Path) -
     )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -1162,7 +1162,7 @@ def test_trial_completion_survives_planner_notification_failure(tmp_path: Path) 
         status=ProposalStatus.READY,
     )
 
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -1221,7 +1221,7 @@ def test_invalid_proposal_survives_planner_error_notification_failure(tmp_path: 
         status=ProposalStatus.READY,
     )
 
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,

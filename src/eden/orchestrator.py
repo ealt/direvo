@@ -71,13 +71,13 @@ def bootstrap(config_path: str | Path, *, progress: bool = True) -> BootstrapRes
     if not git.is_git_repo():
         raise RuntimeError(f"Workspace is not a git repo: {config.workspace_root}")
 
-    direvo_dir = config.experiment_root / ".direvo"
-    planner_direvo_dir = config.planner_root / ".direvo"
-    direvo_dir.mkdir(parents=True, exist_ok=True)
-    planner_direvo_dir.mkdir(parents=True, exist_ok=True)
+    eden_dir = config.experiment_root / ".eden"
+    planner_eden_dir = config.planner_root / ".eden"
+    eden_dir.mkdir(parents=True, exist_ok=True)
+    planner_eden_dir.mkdir(parents=True, exist_ok=True)
     ensure_trial_directories(config.proposals_dir, config.artifacts_dir)
-    _ensure_symlink(config.results_db, planner_direvo_dir / "results.db")
-    _ensure_symlink(config.artifacts_dir, planner_direvo_dir / "artifacts")
+    _ensure_symlink(config.results_db, planner_eden_dir / "results.db")
+    _ensure_symlink(config.artifacts_dir, planner_eden_dir / "artifacts")
     create_grant_symlinks(
         config.file_permissions,
         actor="planner",
@@ -94,7 +94,7 @@ def bootstrap(config_path: str | Path, *, progress: bool = True) -> BootstrapRes
     database_manager.initialize()
     RuntimeSetup().prepare(config)
 
-    session_log_path = direvo_dir / "session.log"
+    session_log_path = eden_dir / "session.log"
     logger = configure_logging(session_log_path, progress=progress, progress_start_time=time.monotonic())
     log_event(
         logger,

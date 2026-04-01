@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 
-from direvo.db import DatabaseManager
-from direvo.models import ObjectiveDirection, ProposalStatus, TrialStatus, TrialUpdate
+from eden.db import DatabaseManager
+from eden.models import ObjectiveDirection, ProposalStatus, TrialStatus, TrialUpdate
 
 
 def _manager(root: Path) -> DatabaseManager:

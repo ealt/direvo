@@ -4,9 +4,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-from direvo.db import DatabaseManager
-from direvo.models import ObjectiveDirection, ObjectiveSpec, TrialStatus, TrialUpdate
-from direvo.summary import render_summary
+from eden.db import DatabaseManager
+from eden.models import ObjectiveDirection, ObjectiveSpec, TrialStatus, TrialUpdate
+from eden.summary import render_summary
 
 
 def _manager(root: Path, metrics_schema: dict[str, str]) -> DatabaseManager:

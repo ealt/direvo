@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from direvo.execution import (
+from eden.execution import (
     CommandRunner,
     CommandTimeoutError,
     EvaluationResult,

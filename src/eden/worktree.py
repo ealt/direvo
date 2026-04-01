@@ -16,14 +16,14 @@ def ensure_trial_directories(proposals_dir: Path, artifacts_dir: Path) -> None:
 
 def ensure_worktree_trial_dir(worktree_path: Path) -> Path:
     """Ensure the trial docs directory exists in a worktree."""
-    trial_dir = worktree_path / ".direvo" / "trial"
+    trial_dir = worktree_path / ".eden" / "trial"
     trial_dir.mkdir(parents=True, exist_ok=True)
     return trial_dir
 
 
 def clean_trial_docs(worktree_path: Path) -> Path:
     """Delete inherited trial docs and return the recreated directory."""
-    trial_dir = worktree_path / ".direvo" / "trial"
+    trial_dir = worktree_path / ".eden" / "trial"
     if trial_dir.exists():
         shutil.rmtree(trial_dir)
     trial_dir.mkdir(parents=True, exist_ok=True)

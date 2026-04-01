@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from direvo.planner import NullPlannerSession, PlannerError, SubprocessPlannerSession
+from eden.planner import NullPlannerSession, PlannerError, SubprocessPlannerSession
 
 
 def test_null_planner_session_is_noop() -> None:

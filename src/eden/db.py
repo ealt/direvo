@@ -19,7 +19,7 @@ class DatabaseError(RuntimeError):
 
 @dataclass(slots=True)
 class DatabaseManager:
-    """Manage DirEvo SQLite databases."""
+    """Manage EDEN SQLite databases."""
 
     results_db: Path
     proposals_db: Path
@@ -236,4 +236,4 @@ class DatabaseManager:
 
     def _read_sql(self, name: str) -> str:
         """Read a packaged SQL file."""
-        return resources.files("direvo.sql").joinpath(name).read_text(encoding="utf-8")
+        return resources.files("eden.sql").joinpath(name).read_text(encoding="utf-8")

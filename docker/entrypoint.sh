@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -eq 0 ]; then
-  echo "usage: direvo-entrypoint [run|doctor] --config PATH" >&2
+  echo "usage: eden-entrypoint [run|doctor] --config PATH" >&2
   exit 2
 fi
 
@@ -30,11 +30,11 @@ case "$command_name" in
       exit 2
     fi
 
-    python3 -m direvo.runtime --config "$config_path"
-    exec python3 -m direvo.cli run "$@"
+    python3 -m eden.runtime --config "$config_path"
+    exec python3 -m eden.cli run "$@"
     ;;
   doctor)
-    exec python3 -m direvo.cli doctor "$@"
+    exec python3 -m eden.cli doctor "$@"
     ;;
   *)
     exec "$command_name" "$@"

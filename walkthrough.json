@@ -1,8 +1,8 @@
 {
-  "title": "DirEvo Architecture Walkthrough",
+  "title": "EDEN Architecture Walkthrough",
   "description": "End-to-end tour of how concurrent research trials are orchestrated inside a Docker container — from config loading through trial execution, evaluation, and termination.",
   "repository": {
-    "remote": "git@github.com:direvo/direvo.git",
+    "remote": "git@github.com:eden/eden.git",
     "commit": "b379818e8f98df58bf0372dab4976198b3e4af5d"
   },
   "metadata": {},
@@ -10,7 +10,7 @@
     {
       "id": 1,
       "title": "System overview",
-      "body": "DirEvo is an orchestration system that runs concurrent research trials inside a single Docker container.\n\nThe core loop: a **planner** proposes experiments by writing to a SQLite database, and an **orchestrator** claims those proposals and dispatches them as parallel git worktrees. Each trial runs under an isolated Linux user for permission enforcement.\n\nThe system uses two SQLite databases:\n- **proposals.db** — the planner writes proposals here, the orchestrator claims them\n- **results.db** — the orchestrator records trial outcomes here, the planner reads them\n\nThis walkthrough follows the execution flow from container startup to trial completion."
+      "body": "EDEN is an orchestration system that runs concurrent research trials inside a single Docker container.\n\nThe core loop: a **planner** proposes experiments by writing to a SQLite database, and an **orchestrator** claims those proposals and dispatches them as parallel git worktrees. Each trial runs under an isolated Linux user for permission enforcement.\n\nThe system uses two SQLite databases:\n- **proposals.db** — the planner writes proposals here, the orchestrator claims them\n- **results.db** — the orchestrator records trial outcomes here, the planner reads them\n\nThis walkthrough follows the execution flow from container startup to trial completion."
     },
     {
       "id": 2,
@@ -22,97 +22,97 @@
       "id": 3,
       "title": "CLI entry point: run vs doctor",
       "body": "The CLI has two commands:\n- `run` — bootstrap and start the orchestrator\n- `doctor` — validate the environment without running anything\n\nFor `run` (line 40-43), the flow is: load config → bootstrap (create DBs, set up logging) → create Orchestrator → call `run()`. The bootstrap is separated from the Orchestrator so that shared state (databases, logger) can be initialized once and injected.",
-      "location": "src/direvo/cli.py:31-47"
+      "location": "src/eden/cli.py:31-47"
     },
     {
       "id": 4,
       "title": "Configuration: YAML loading and validation",
-      "body": "Configuration is loaded from a YAML file (typically `.direvo/config.yaml`). The loader validates every field strictly — positive integers, duration parsing (`24h` → seconds), SQL expression validation against an in-memory SQLite schema, and path resolution relative to the workspace root.\n\nNotice how `_infer_workspace_root` (line 122) derives the workspace from the config path: if the config is inside `.direvo/`, the workspace is the parent of that directory. All relative paths in the config resolve against this root.",
-      "location": "src/direvo/config.py:23-119"
+      "body": "Configuration is loaded from a YAML file (typically `.eden/config.yaml`). The loader validates every field strictly — positive integers, duration parsing (`24h` → seconds), SQL expression validation against an in-memory SQLite schema, and path resolution relative to the workspace root.\n\nNotice how `_infer_workspace_root` (line 122) derives the workspace from the config path: if the config is inside `.eden/`, the workspace is the parent of that directory. All relative paths in the config resolve against this root.",
+      "location": "src/eden/config.py:23-119"
     },
     {
       "id": 5,
       "title": "SQL expression validation at config time",
       "body": "This is a clever config-time safety check. The system creates an in-memory SQLite database with the same schema as `results.db` (including user-defined metric columns), then runs the `objective.expr` and `target_condition` as queries against it.\n\nIf the SQL is invalid or references columns that don't exist, you get a clear error at startup — not a cryptic failure mid-trial. This is why `metrics_schema` is required: it defines the dynamic columns that objective/target expressions can reference.",
-      "location": "src/direvo/config.py:257-289"
+      "location": "src/eden/config.py:257-289"
     },
     {
       "id": 6,
       "title": "Data models: frozen dataclasses",
       "body": "All core types are frozen dataclasses — they're immutable after creation. This is a deliberate pattern: config and results flow through the system as values, not mutable state.\n\nKey types:\n- `SessionConfig` — the fully validated config, passed everywhere\n- `ProposalClaim` — a claimed proposal from the queue\n- `ValidatedProposal` — a proposal that passed orchestrator-side validation (parsed JSON fields, verified docs exist)\n- `TrialUpdate` — the payload written back to results.db\n- `TrialPaths` — filesystem paths for a trial's worktree, docs, and artifacts\n\nThe status enums (`TrialStatus`, `ProposalStatus`) encode the state machines for both databases.",
-      "location": "src/direvo/models.py:1-115"
+      "location": "src/eden/models.py:1-115"
     },
     {
       "id": 7,
       "title": "Container runtime: user creation and permissions",
       "body": "When running as root inside Docker, `RuntimeSetup.prepare()` creates isolated Linux users:\n- One `planner` user for the planner subprocess\n- One `trial-N` user per parallel trial slot\n\nThen it applies a careful permission scheme:\n- Workspace root: owned by root, group `planner` (so planner can traverse)\n- `.git/`: root:planner with 750/640 (planner can read, trial users cannot)\n- `proposals/`: owned by planner (read/write), since the planner creates proposals\n- `results.db`: root:planner 640 (orchestrator writes, planner reads)\n- `proposals.db`: planner:root 660 (planner writes, orchestrator reads)\n\nThis permission model enforces that trial users can only access their own worktree.",
-      "location": "src/direvo/runtime.py:26-76"
+      "location": "src/eden/runtime.py:26-76"
     },
     {
       "id": 8,
       "title": "Bootstrap: initializing session state",
-      "body": "Bootstrap creates the persistent state needed for a session:\n1. Verify the workspace is a git repo\n2. Create the `.direvo/`, proposals, and artifacts directories\n3. Initialize both SQLite databases (create tables if they don't exist)\n4. Set up structured JSON logging to `session.log`\n\nThe result is a `BootstrapResult` containing the validated config, database manager, and logger — everything the Orchestrator needs.",
-      "location": "src/direvo/orchestrator.py:52-87"
+      "body": "Bootstrap creates the persistent state needed for a session:\n1. Verify the workspace is a git repo\n2. Create the `.eden/`, proposals, and artifacts directories\n3. Initialize both SQLite databases (create tables if they don't exist)\n4. Set up structured JSON logging to `session.log`\n\nThe result is a `BootstrapResult` containing the validated config, database manager, and logger — everything the Orchestrator needs.",
+      "location": "src/eden/orchestrator.py:52-87"
     },
     {
       "id": 9,
       "title": "Database manager: two-database coordination",
       "body": "The `DatabaseManager` handles both SQLite databases. Key design decisions:\n\n- **WAL mode** (line 193): Write-Ahead Logging allows concurrent readers and writers without blocking\n- **Busy timeout** (line 194): Retries on lock contention instead of failing immediately\n- **Dynamic schema** (line 209-215): The results table is rendered from a SQL template with user-defined metric columns injected via string replacement\n- **Context manager** (line 196-207): Every operation gets its own connection that auto-commits or rolls back — no connection pooling, no leaked state",
-      "location": "src/direvo/db.py:21-28,188-219"
+      "location": "src/eden/db.py:21-28,188-219"
     },
     {
       "id": 10,
       "title": "Atomic proposal claiming",
       "body": "This is the heart of the coordination model. `claim_ready_proposal()` uses `BEGIN IMMEDIATE` to acquire an exclusive lock on proposals.db *before* reading.\n\nWithout `BEGIN IMMEDIATE`, two workers could both read the same highest-priority proposal, then both try to update it — a classic TOCTOU race. `BEGIN IMMEDIATE` serializes access: only one worker can be inside this transaction at a time.\n\nThe claim atomically reads the top-priority ready proposal and flips its status to `dispatched` in a single transaction.",
-      "location": "src/direvo/db.py:68-96"
+      "location": "src/eden/db.py:68-96"
     },
     {
       "id": 11,
       "title": "The orchestrator: async dispatch loop",
       "body": "The orchestrator uses `asyncio` to run one worker coroutine per trial slot. Each worker loops:\n1. Acquire the coordination lock\n2. Check termination conditions\n3. Try to claim a proposal\n4. If no proposal and there's a planner, sleep and retry\n5. If a proposal is claimed, validate it and run the trial in a thread\n\nThe coordination lock (line 161) ensures that termination checks and proposal claiming happen atomically — so if `max_trials` is 10 and the count is 9, only one worker will claim the last proposal.\n\n`asyncio.to_thread` (line 216) offloads the actual trial execution to a thread pool, keeping the async loop responsive.",
-      "location": "src/direvo/orchestrator.py:157-230"
+      "location": "src/eden/orchestrator.py:157-230"
     },
     {
       "id": 12,
       "title": "Trial preparation: worktrees and branches",
-      "body": "Before executing a trial, `_prepare_trial` sets up an isolated workspace:\n\n1. **Ensure worktree** — reuse the slot's persistent worktree (or create it)\n2. **Create branch** — `trial/{id}-{slug}` branching from the proposal's parent commit\n3. **Checkout** — switch the worktree to the new branch\n4. **Merge** — if there's a second parent commit, start a no-commit merge (supports diamond merges)\n5. **Copy docs** — place the proposal's artifacts into `.direvo/trial/` inside the worktree\n6. **Secure** — `chown` the entire worktree to the trial user and restrict permissions to 700\n\nEach trial slot gets its own worktree, branch, and Linux user — full isolation.",
-      "location": "src/direvo/orchestrator.py:420-438"
+      "body": "Before executing a trial, `_prepare_trial` sets up an isolated workspace:\n\n1. **Ensure worktree** — reuse the slot's persistent worktree (or create it)\n2. **Create branch** — `trial/{id}-{slug}` branching from the proposal's parent commit\n3. **Checkout** — switch the worktree to the new branch\n4. **Merge** — if there's a second parent commit, start a no-commit merge (supports diamond merges)\n5. **Copy docs** — place the proposal's artifacts into `.eden/trial/` inside the worktree\n6. **Secure** — `chown` the entire worktree to the trial user and restrict permissions to 700\n\nEach trial slot gets its own worktree, branch, and Linux user — full isolation.",
+      "location": "src/eden/orchestrator.py:420-438"
     },
     {
       "id": 13,
       "title": "Git worktree lifecycle",
       "body": "Git worktrees are the isolation primitive: each trial slot gets a persistent worktree at `worktrees/wt-{slot}`.\n\n`initialize_worktree` (line 42) is called at session start and performs deterministic recovery: prune stale metadata → abort any in-progress merge/rebase → hard reset → clean untracked files → verify clean status. This 5-step sequence guarantees a clean slate even if the previous session crashed mid-trial.\n\nThe `safe.directory` config (line 136) is needed because worktrees owned by trial users would otherwise fail git's ownership check when run as root.",
-      "location": "src/direvo/git_manager.py:42-53,125-156"
+      "location": "src/eden/git_manager.py:42-53,125-156"
     },
     {
       "id": 14,
       "title": "Execution: running the trial agent",
       "body": "The execution manager runs the configured `execution_command` (default: `claude -p {direction}`) with the proposal description substituted in.\n\nWhen running as root with a valid trial user, it wraps the command in `su <user> -s /bin/sh -c '...'` (line 186-191) — this is how each trial runs under its isolated Linux user.\n\nThe result is a simple success/failure with stdout, stderr, and exit code. Timeouts produce a clean failure result rather than an exception.",
-      "location": "src/direvo/execution.py:77-202"
+      "location": "src/eden/execution.py:77-202"
     },
     {
       "id": 15,
       "title": "Evaluation: parsing metrics from stdout",
       "body": "After execution succeeds, the eval script runs in the worktree. The contract is simple: the script must print a JSON object to stdout containing the trial's metrics.\n\nThe evaluation result handles four failure modes:\n- Timeout → `reason: \"timeout\"`\n- Non-zero exit → `reason: \"nonzero_exit\"`\n- Stdout isn't valid JSON → `reason: \"invalid_json\"`\n- JSON isn't a dict → `reason: \"invalid_json\"`\n\nOn success, the metrics dict (e.g., `{\"accuracy\": 0.95, \"loss\": 0.12}`) flows into the trial update and gets stored in the dynamic columns of results.db.",
-      "location": "src/direvo/execution.py:118-174"
+      "location": "src/eden/execution.py:118-174"
     },
     {
       "id": 16,
       "title": "Recording results and recovery",
       "body": "After evaluation, the orchestrator commits all changes in the worktree, copies trial docs to the artifacts directory, and writes the trial outcome to results.db.\n\nIf anything fails — execution error, evaluation error, or an unexpected exception — `_recover_trial` (line 440) kicks in. Recovery is aggressive and deterministic:\n1. Abort any in-progress git state\n2. Hard reset the worktree\n3. Clean all untracked files\n4. Verify clean status (fail loudly if not clean)\n5. Record the error in results.db\n6. Re-enqueue the proposal as `ready` with reduced priority\n\nThe priority reduction (line 469) prevents a repeatedly-failing proposal from starving the queue.",
-      "location": "src/direvo/orchestrator.py:440-478"
+      "location": "src/eden/orchestrator.py:440-478"
     },
     {
       "id": 17,
       "title": "Planner integration: stdin notifications",
       "body": "The planner is a long-lived subprocess that receives notifications via stdin. When a trial completes, the orchestrator writes a formatted message (e.g., `\"Trial completed. ID: 42\"`) to the planner's stdin pipe.\n\nThe `SubprocessPlannerSession` manages the process lifecycle: start with stability check (verify it doesn't immediately crash), send notifications via `_write_message`, and graceful shutdown with escalating signals (close stdin → wait → SIGTERM → wait → SIGKILL).\n\nIf no `planner_command` is configured, a `NullPlannerSession` is used and the system processes only pre-loaded proposals.",
-      "location": "src/direvo/planner.py:41-125"
+      "location": "src/eden/planner.py:41-125"
     },
     {
       "id": 18,
       "title": "Termination: when does the session stop?",
       "body": "The `should_terminate` function checks five conditions in order:\n1. **Max trials** — claimed count >= configured limit\n2. **Wall time** — elapsed time exceeds the configured maximum\n3. **Target condition** — a SQL WHERE clause is satisfied by any completed trial (e.g., `accuracy > 0.99`)\n4. **Convergence** — the objective metric hasn't improved over the last `convergence_window` trials\n5. **User interrupt** — SIGINT/SIGTERM sets a threading Event\n\nConvergence detection (line 19-31) compares the best value in the recent window against the best in all preceding trials. If the recent window shows no improvement, the search has stalled.\n\nAdditionally, `queue_empty` and `queue_repeat` are detected in the orchestrator loop when no new proposals are available.",
-      "location": "src/direvo/termination.py:1-60"
+      "location": "src/eden/termination.py:1-60"
     },
     {
       "id": 19,

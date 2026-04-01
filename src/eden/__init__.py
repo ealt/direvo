@@ -1,4 +1,4 @@
-"""DirEvo package."""
+"""EDEN package."""
 
 __all__ = ["__version__"]
 

@@ -19,11 +19,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-_LOG_DIR = os.environ.get("DIREVO_LOG_DIR")
+_LOG_DIR = os.environ.get("EDEN_LOG_DIR")
 
 
 def _log(**fields: object) -> None:
-    """Append a JSON log line to plan.log if DIREVO_LOG_DIR is set."""
+    """Append a JSON log line to plan.log if EDEN_LOG_DIR is set."""
     if _LOG_DIR is None:
         return
     with open(os.path.join(_LOG_DIR, "plan.log"), "a", encoding="utf-8") as f:
@@ -103,9 +103,9 @@ def main() -> None:
     head_sha = get_head_sha(workspace)
     _log(event="startup", parallel_trials=parallel_trials, head=head_sha)
 
-    proposals_db = ".direvo/proposals.db"
-    results_db = ".direvo/results.db"
-    proposals_dir = ".direvo/proposals"
+    proposals_db = ".eden/proposals.db"
+    results_db = ".eden/results.db"
+    proposals_dir = ".eden/proposals"
 
     initial_batch = parallel_trials + 2
     next_seed = 0

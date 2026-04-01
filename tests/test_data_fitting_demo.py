@@ -158,7 +158,7 @@ _SKIP_AI = not (os.environ.get("DIREVO_RUN_AI_DEMO") == "1" and shutil.which("co
 @pytest.mark.skipif(_SKIP_AI, reason="Requires DIREVO_RUN_AI_DEMO=1, codex, and claude on PATH")
 def test_data_fitting_demo(tmp_path: Path) -> None:
     """Run the full data-fitting demo with real AI agents."""
-    from direvo.orchestrator import Orchestrator, bootstrap
+    from eden.orchestrator import Orchestrator, bootstrap
 
     experiment_root = tmp_path / "experiment"
     shutil.copytree(DEMO_DIR, experiment_root)

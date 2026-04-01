@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from direvo.logging import ProgressFormatter, configure_logging, log_event
+from eden.logging import ProgressFormatter, configure_logging, log_event
 
 
 def _record(event: str, **fields: object) -> logging.LogRecord:
-    record = logging.LogRecord("direvo", logging.INFO, __file__, 1, event, (), None)
+    record = logging.LogRecord("eden", logging.INFO, __file__, 1, event, (), None)
     record.event = event
     record.fields = fields
     return record

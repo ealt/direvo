@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from direvo.git_manager import GitManager
+from eden.git_manager import GitManager
 
 
 def _run(command: list[str], cwd: Path) -> None:

@@ -104,10 +104,10 @@ class GitManager:
         """Stage and commit all changes in a worktree."""
         self._run_git(["add", "-A"], repo_path=worktree_path)
         env = {
-            "GIT_AUTHOR_NAME": "DirEvo",
-            "GIT_AUTHOR_EMAIL": "direvo@example.local",
-            "GIT_COMMITTER_NAME": "DirEvo",
-            "GIT_COMMITTER_EMAIL": "direvo@example.local",
+            "GIT_AUTHOR_NAME": "EDEN",
+            "GIT_AUTHOR_EMAIL": "eden@example.local",
+            "GIT_COMMITTER_NAME": "EDEN",
+            "GIT_COMMITTER_EMAIL": "eden@example.local",
         }
         self._run_git(["commit", "-m", message], repo_path=worktree_path, env=env)
 

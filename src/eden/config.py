@@ -99,16 +99,16 @@ def load_config(config_path: str | Path) -> SessionConfig:
         convergence_window=convergence_window,
         target_condition=target_condition,
         results_db=_resolve_path(
-            experiment_root, raw.get("results_db", ".direvo/results.db")
+            experiment_root, raw.get("results_db", ".eden/results.db")
         ),
         proposals_db=_resolve_path(
-            planner_root, raw.get("proposals_db", ".direvo/proposals.db")
+            planner_root, raw.get("proposals_db", ".eden/proposals.db")
         ),
         proposals_dir=_resolve_path(
-            planner_root, raw.get("proposals_dir", ".direvo/proposals")
+            planner_root, raw.get("proposals_dir", ".eden/proposals")
         ),
         artifacts_dir=_resolve_path(
-            experiment_root, raw.get("artifacts_dir", ".direvo/artifacts")
+            experiment_root, raw.get("artifacts_dir", ".eden/artifacts")
         ),
         implement_command=_resolve_command(
             experiment_root,
@@ -139,7 +139,7 @@ def load_config(config_path: str | Path) -> SessionConfig:
 
 def _infer_experiment_root(config_path: Path) -> Path:
     """Infer the experiment root from the config path."""
-    if config_path.parent.name == ".direvo":
+    if config_path.parent.name == ".eden":
         return config_path.parent.parent
     return config_path.parent
 
@@ -214,8 +214,8 @@ def _validate_file_permissions(
             raise ConfigError("file_permissions path must not contain '..'.")
         if not normalized.parts:
             raise ConfigError("file_permissions path must not be empty.")
-        if normalized.parts[0] == ".direvo":
-            raise ConfigError("file_permissions path must not target .direvo.")
+        if normalized.parts[0] == ".eden":
+            raise ConfigError("file_permissions path must not target .eden.")
 
         source = (experiment_root / normalized).resolve()
         if experiment_root not in source.parents:

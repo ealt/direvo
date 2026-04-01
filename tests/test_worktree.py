@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from direvo.worktree import secure_worktree_git_metadata, secure_worktree_root
+from eden.worktree import secure_worktree_git_metadata, secure_worktree_root
 
 
 def test_secure_worktree_root_skips_restrictive_mode_when_chown_fails(

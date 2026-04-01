@@ -1,6 +1,6 @@
-# Contributing to DirEvo
+# Contributing to EDEN
 
-Thank you for your interest in contributing to direvo!
+Thank you for your interest in contributing to eden!
 
 ## Prerequisites
 
@@ -13,8 +13,8 @@ Thank you for your interest in contributing to direvo!
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/direvo.git
-   cd direvo
+   git clone https://github.com/YOUR_USERNAME/eden.git
+   cd eden
    ```
 
 2. Install dependencies:
@@ -31,10 +31,10 @@ Thank you for your interest in contributing to direvo!
 
 ### Running the Project
 
-DirEvo runs inside a Docker container. For local development, you primarily interact through the test suite and the `doctor` command:
+EDEN runs inside a Docker container. For local development, you primarily interact through the test suite and the `doctor` command:
 
 ```bash
-uv run direvo doctor --config /path/to/.direvo/config.yaml
+uv run eden doctor --config /path/to/.eden/config.yaml
 ```
 
 ### Running Tests

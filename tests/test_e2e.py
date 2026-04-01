@@ -19,7 +19,7 @@ from typing import cast
 
 import pytest
 
-from direvo.orchestrator import Orchestrator, bootstrap
+from eden.orchestrator import Orchestrator, bootstrap
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "experiment"
 
@@ -222,14 +222,14 @@ def test_experiment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run the seed-sum experiment end-to-end."""
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    monkeypatch.setenv("DIREVO_LOG_DIR", str(log_dir))
+    monkeypatch.setenv("EDEN_LOG_DIR", str(log_dir))
 
     experiment_root = tmp_path / "experiment"
     shutil.copytree(FIXTURE_DIR, experiment_root)
     workspace = experiment_root / "planner" / "workspace"
 
     # Patch config to use the current venv python (system python3 may lack deps)
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".eden" / "config.yaml"
     config_text = config_path.read_text().replace("python3", sys.executable)
     config_path.write_text(config_text)
 

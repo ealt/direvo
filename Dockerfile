@@ -14,8 +14,8 @@ COPY docs /app/docs
 COPY src /app/src
 RUN pip install --no-cache-dir .
 
-COPY docker/entrypoint.sh /usr/local/bin/direvo-entrypoint
-RUN chmod 0755 /usr/local/bin/direvo-entrypoint
+COPY docker/entrypoint.sh /usr/local/bin/eden-entrypoint
+RUN chmod 0755 /usr/local/bin/eden-entrypoint
 
 WORKDIR /workspace
-ENTRYPOINT ["direvo-entrypoint"]
+ENTRYPOINT ["eden-entrypoint"]
