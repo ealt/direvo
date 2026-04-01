@@ -20,10 +20,12 @@ class TimeoutRunner(CommandRunner):
 class StaticRunner(CommandRunner):
     def __init__(self, completed: subprocess.CompletedProcess[str]) -> None:
         self.completed = completed
+        self.calls: list[list[str]] = []
 
     def run(
         self, command: list[str], *, cwd: Path, timeout_sec: int
     ) -> subprocess.CompletedProcess[str]:
+        self.calls.append(command)
         return self.completed
 
 
@@ -136,3 +138,33 @@ def test_run_as_user_falls_back_to_direct_command_when_user_missing(
         returncode=0,
         reason=None,
     )
+
+
+def test_run_as_user_sets_auth_and_xdg_environment_when_configured(
+    monkeypatch, tmp_path: Path
+) -> None:
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    runner = StaticRunner(completed)
+    manager = ImplementationManager(runner=runner, implement_command="codex exec --ephemeral test")
+
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr("pwd.getpwnam", lambda user: object())
+    monkeypatch.setenv("DIREVO_AUTH_HOME", "/root")
+    monkeypatch.setenv("DIREVO_RUNTIME_DIR", "/tmp/direvo-runtime")
+    monkeypatch.setenv("PATH", "/usr/local/bin:/root/.codex/tmp/path/codex-arg0bad:/usr/bin")
+
+    manager.run_implementation(
+        worktree_path=tmp_path,
+        slot=0,
+        timeout_sec=30,
+        user="trial-0",
+    )
+
+    assert runner.calls
+    command = runner.calls[0]
+    assert command[:4] == ["su", "trial-0", "-s", "/bin/sh"]
+    assert "HOME=/tmp/direvo-runtime/trial-0/home" in command[-1]
+    assert "CODEX_HOME=/tmp/direvo-runtime/trial-0/home/.codex" in command[-1]
+    assert "TMPDIR=/tmp/direvo-runtime/trial-0/tmp" in command[-1]
+    assert "XDG_CACHE_HOME=/tmp/direvo-runtime/trial-0/cache" in command[-1]
+    assert "PATH=/usr/local/bin:/usr/bin" in command[-1]

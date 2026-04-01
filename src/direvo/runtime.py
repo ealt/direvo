@@ -37,6 +37,11 @@ class RuntimeSetup:
         for slot in range(config.parallel_trials):
             self._ensure_user(f"trial-{slot}")
 
+        self._ensure_runtime_dirs("planner")
+        for slot in range(config.parallel_trials):
+            self._ensure_runtime_dirs(f"trial-{slot}")
+
+        self._mark_git_safe_directory(config.workspace_root)
         self._ensure_ancestor_traversal(config.planner_root)
         self._ensure_ancestor_traversal(config.workspace_root)
         self._apply_directory_permissions(config.experiment_root, user="root", group="root", mode=0o711)
@@ -100,6 +105,58 @@ class RuntimeSetup:
         if result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip() or f"Failed to create user: {username}"
             raise RuntimeError(message)
+
+    def _mark_git_safe_directory(self, workspace_root: Path) -> None:
+        """Allow non-owner planner reads of the shared workspace repository."""
+        result = self.runner.run(["git", "config", "--system", "--add", "safe.directory", str(workspace_root)])
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip()
+            if not message:
+                message = f"Failed to mark safe.directory: {workspace_root}"
+            raise RuntimeError(message)
+
+    def _ensure_runtime_dirs(self, username: str) -> None:
+        """Create writable per-user runtime directories for XDG state and cache."""
+        runtime_root = os.environ.get("DIREVO_RUNTIME_DIR")
+        if not runtime_root:
+            return
+        user_root = Path(runtime_root) / username
+        for name in ("state", "cache", "share", "home", "tmp"):
+            path = user_root / name
+            path.mkdir(parents=True, exist_ok=True)
+            self._apply_directory_permissions(path, user=username, group=username, mode=0o700)
+        codex_home = user_root / "home" / ".codex"
+        codex_home.mkdir(parents=True, exist_ok=True)
+        self._seed_codex_home(codex_home)
+        self._apply_tree_permissions(
+            codex_home,
+            user=username,
+            group=username,
+            directory_mode=0o700,
+            file_mode=0o600,
+        )
+
+    def _seed_codex_home(self, destination: Path) -> None:
+        """Populate a writable Codex home from the mounted auth directory when available."""
+        auth_home = os.environ.get("DIREVO_AUTH_HOME")
+        if not auth_home:
+            return
+        source = Path(auth_home) / ".codex"
+        if not source.exists() or not source.is_dir():
+            return
+        for item in source.iterdir():
+            if item.name == "tmp":
+                continue
+            target = destination / item.name
+            try:
+                if item.is_symlink() and not item.exists():
+                    continue
+                if item.is_dir():
+                    shutil.copytree(item, target, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, target)
+            except FileNotFoundError:
+                continue
 
     def _apply_tree_permissions(
         self,

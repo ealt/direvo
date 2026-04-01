@@ -78,6 +78,27 @@ def secure_worktree_root(worktree_path: Path, user: str) -> None:
         worktree_path.chmod(0o700)
 
 
+def secure_worktree_git_metadata(workspace_root: Path, slot: int, user: str) -> None:
+    """Grant a trial user read access to shared git metadata plus its own worktree gitdir."""
+    if os.geteuid() != 0:
+        return
+    if not _user_exists(user):
+        return
+
+    git_root = workspace_root / ".git"
+    if not git_root.exists():
+        return
+
+    worktrees_root = git_root / "worktrees"
+    _grant_shared_git_read_access(git_root, worktrees_root)
+    if worktrees_root.exists():
+        worktrees_root.chmod(0o711)
+
+    gitdir = worktrees_root / f"wt-{slot}"
+    if chown_recursive(gitdir, user):
+        _set_tree_mode(gitdir, directory_mode=0o700, file_mode=0o600)
+
+
 def _user_exists(user: str) -> bool:
     """Return whether a system user exists."""
     try:
@@ -85,3 +106,35 @@ def _user_exists(user: str) -> bool:
     except KeyError:
         return False
     return True
+
+
+def _grant_shared_git_read_access(git_root: Path, worktrees_root: Path) -> None:
+    """Expose shared git metadata while keeping per-worktree gitdirs private."""
+    if not git_root.exists():
+        return
+    git_root.chmod(0o755)
+    for root, directories, files in os.walk(git_root):
+        root_path = Path(root)
+        if root_path == worktrees_root or worktrees_root in root_path.parents:
+            directories[:] = []
+            continue
+        directories[:] = [name for name in directories if root_path / name != worktrees_root]
+        if root_path != git_root:
+            root_path.chmod(0o755)
+        for filename in files:
+            (root_path / filename).chmod(0o644)
+
+
+def _set_tree_mode(path: Path, *, directory_mode: int, file_mode: int) -> None:
+    """Apply modes recursively to a tree."""
+    if not path.exists():
+        return
+    path.chmod(directory_mode)
+    for root, directories, files in os.walk(path):
+        root_path = Path(root)
+        if root_path != path:
+            root_path.chmod(directory_mode)
+        for directory in directories:
+            (root_path / directory).chmod(directory_mode)
+        for filename in files:
+            (root_path / filename).chmod(file_mode)
