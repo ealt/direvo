@@ -92,8 +92,8 @@ def test_subprocess_planner_session_sets_auth_and_xdg_environment_when_configure
 ) -> None:
     monkeypatch.setattr("os.geteuid", lambda: 0)
     monkeypatch.setattr("pwd.getpwnam", lambda user: object())
-    monkeypatch.setenv("DIREVO_AUTH_HOME", "/root")
-    monkeypatch.setenv("DIREVO_RUNTIME_DIR", "/tmp/direvo-runtime")
+    monkeypatch.setenv("EDEN_AUTH_HOME", "/root")
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", "/tmp/eden-runtime")
     session = SubprocessPlannerSession(
         command="python3 planner.py --watch",
         planner_root=tmp_path,
@@ -104,7 +104,7 @@ def test_subprocess_planner_session_sets_auth_and_xdg_environment_when_configure
     command = session._planner_command()
 
     assert "HOME=/root" in command[-1]
-    assert "XDG_STATE_HOME=/tmp/direvo-runtime/planner/state" in command[-1]
+    assert "XDG_STATE_HOME=/tmp/eden-runtime/planner/state" in command[-1]
 
 
 def test_subprocess_planner_session_runs_directly_when_not_root(

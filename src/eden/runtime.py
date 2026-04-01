@@ -119,7 +119,7 @@ class RuntimeSetup:
 
     def _ensure_runtime_dirs(self, username: str) -> None:
         """Create writable per-user runtime directories for XDG state and cache."""
-        runtime_root = os.environ.get("DIREVO_RUNTIME_DIR")
+        runtime_root = os.environ.get("EDEN_RUNTIME_DIR")
         if not runtime_root:
             return
         user_root = Path(runtime_root) / username
@@ -140,7 +140,7 @@ class RuntimeSetup:
 
     def _seed_codex_home(self, destination: Path) -> None:
         """Populate a writable Codex home from the mounted auth directory when available."""
-        auth_home = os.environ.get("DIREVO_AUTH_HOME")
+        auth_home = os.environ.get("EDEN_AUTH_HOME")
         if not auth_home:
             return
         source = Path(auth_home) / ".codex"

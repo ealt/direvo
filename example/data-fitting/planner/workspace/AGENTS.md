@@ -1,6 +1,6 @@
 # Instructions
 
-Read `.direvo/trial/plan.md` and implement exactly what it describes.
+Read `.eden/trial/plan.md` and implement exactly what it describes.
 
 ## Interface
 
@@ -24,5 +24,5 @@ def predict(X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray) -> np.
 ## Artifacts
 
 After implementing the plan, write a brief summary (2-3 sentences) to
-`.direvo/trial/notes.md` describing what you implemented and any design
+`.eden/trial/notes.md` describing what you implemented and any design
 decisions you made.

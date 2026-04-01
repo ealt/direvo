@@ -12,8 +12,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-IMAGE_NAME="direvo-data-fitting-demo"
-OUTPUT_DIR="${DIREVO_OUTPUT_DIR:-./direvo-output-$(date +%Y%m%d-%H%M%S)}"
+IMAGE_NAME="eden-data-fitting-demo"
+OUTPUT_DIR="${EDEN_OUTPUT_DIR:-./eden-output-$(date +%Y%m%d-%H%M%S)}"
 
 case "$OUTPUT_DIR" in
     /*) OUTPUT_HOST_DIR="$OUTPUT_DIR" ;;

@@ -33,7 +33,7 @@ class _JSONLineFormatter(logging.Formatter):
 
 
 def _configure_logging() -> None:
-    _log_dir = os.environ.get("DIREVO_LOG_DIR")
+    _log_dir = os.environ.get("EDEN_LOG_DIR")
     if _log_dir:
         handler = logging.FileHandler(os.path.join(_log_dir, "plan.log"))
         handler.setFormatter(_JSONLineFormatter())
@@ -120,7 +120,7 @@ def get_all_trials(results_db: str) -> list[dict]:
 
 def read_trial_artifact(trial_id: int, filename: str) -> str | None:
     """Read an artifact file from a completed trial."""
-    path = Path(f".direvo/artifacts/trial-{trial_id}/{filename}")
+    path = Path(f".eden/artifacts/trial-{trial_id}/{filename}")
     if path.exists():
         return path.read_text(encoding="utf-8").strip()
     return None
@@ -269,9 +269,9 @@ def main() -> None:
     head_sha = get_head_sha(workspace)
     logger.info("startup", extra={"event": "startup", "parallel_trials": parallel_trials, "head": head_sha})
 
-    proposals_db = ".direvo/proposals.db"
-    results_db = ".direvo/results.db"
-    proposals_dir = ".direvo/proposals"
+    proposals_db = ".eden/proposals.db"
+    results_db = ".eden/results.db"
+    proposals_dir = ".eden/proposals"
 
     initial_batch = parallel_trials + 2
     for _i, strategy in enumerate(INITIAL_STRATEGIES[:initial_batch]):

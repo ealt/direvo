@@ -149,8 +149,8 @@ def test_run_as_user_sets_auth_and_xdg_environment_when_configured(
 
     monkeypatch.setattr("os.geteuid", lambda: 0)
     monkeypatch.setattr("pwd.getpwnam", lambda user: object())
-    monkeypatch.setenv("DIREVO_AUTH_HOME", "/root")
-    monkeypatch.setenv("DIREVO_RUNTIME_DIR", "/tmp/direvo-runtime")
+    monkeypatch.setenv("EDEN_AUTH_HOME", "/root")
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", "/tmp/eden-runtime")
     monkeypatch.setenv("PATH", "/usr/local/bin:/root/.codex/tmp/path/codex-arg0bad:/usr/bin")
 
     manager.run_implementation(
@@ -163,8 +163,8 @@ def test_run_as_user_sets_auth_and_xdg_environment_when_configured(
     assert runner.calls
     command = runner.calls[0]
     assert command[:4] == ["su", "trial-0", "-s", "/bin/sh"]
-    assert "HOME=/tmp/direvo-runtime/trial-0/home" in command[-1]
-    assert "CODEX_HOME=/tmp/direvo-runtime/trial-0/home/.codex" in command[-1]
-    assert "TMPDIR=/tmp/direvo-runtime/trial-0/tmp" in command[-1]
-    assert "XDG_CACHE_HOME=/tmp/direvo-runtime/trial-0/cache" in command[-1]
+    assert "HOME=/tmp/eden-runtime/trial-0/home" in command[-1]
+    assert "CODEX_HOME=/tmp/eden-runtime/trial-0/home/.codex" in command[-1]
+    assert "TMPDIR=/tmp/eden-runtime/trial-0/tmp" in command[-1]
+    assert "XDG_CACHE_HOME=/tmp/eden-runtime/trial-0/cache" in command[-1]
     assert "PATH=/usr/local/bin:/usr/bin" in command[-1]

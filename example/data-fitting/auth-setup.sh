@@ -7,10 +7,10 @@
 # /root/.codex.  We need /root to be traversable and the auth files readable.
 set -eu
 
-export DIREVO_AUTH_HOME=/root
-export DIREVO_RUNTIME_DIR=/tmp/direvo-runtime
+export EDEN_AUTH_HOME=/root
+export EDEN_RUNTIME_DIR=/tmp/eden-runtime
 
-mkdir -p "$DIREVO_RUNTIME_DIR" 2>/dev/null || true
+mkdir -p "$EDEN_RUNTIME_DIR" 2>/dev/null || true
 
 chmod 711 /root 2>/dev/null || true
 
@@ -33,15 +33,15 @@ sync_results() {
         return
     fi
 
-    mkdir -p /output/.direvo 2>/dev/null || true
-    mkdir -p /output/planner/.direvo 2>/dev/null || true
+    mkdir -p /output/.eden 2>/dev/null || true
+    mkdir -p /output/planner/.eden 2>/dev/null || true
 
     # Mirror runtime state for live host-side inspection while the demo runs.
-    cp -a /experiment/.direvo/. /output/.direvo/ 2>/dev/null || true
-    cp /experiment/planner/.direvo/proposals.db /output/planner/.direvo/ 2>/dev/null || true
-    cp /experiment/planner/.direvo/proposals.db-wal /output/planner/.direvo/ 2>/dev/null || true
-    cp /experiment/planner/.direvo/proposals.db-shm /output/planner/.direvo/ 2>/dev/null || true
-    cp -a /experiment/planner/.direvo/proposals /output/planner/.direvo/ 2>/dev/null || true
+    cp -a /experiment/.eden/. /output/.eden/ 2>/dev/null || true
+    cp /experiment/planner/.eden/proposals.db /output/planner/.eden/ 2>/dev/null || true
+    cp /experiment/planner/.eden/proposals.db-wal /output/planner/.eden/ 2>/dev/null || true
+    cp /experiment/planner/.eden/proposals.db-shm /output/planner/.eden/ 2>/dev/null || true
+    cp -a /experiment/planner/.eden/proposals /output/planner/.eden/ 2>/dev/null || true
 }
 
 export_results() {
@@ -50,14 +50,14 @@ export_results() {
 }
 
 sync_output_loop() {
-    interval="${DIREVO_SYNC_INTERVAL_SEC:-2}"
+    interval="${EDEN_SYNC_INTERVAL_SEC:-2}"
     while kill -0 "$child_pid" 2>/dev/null; do
         sync_results
         sleep "$interval"
     done
 }
 
-direvo-entrypoint "$@" &
+eden-entrypoint "$@" &
 child_pid=$!
 sync_pid=""
 

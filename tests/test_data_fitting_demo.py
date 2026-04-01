@@ -1,7 +1,7 @@
 """Tests for the data-fitting demo.
 
 Always-run tests verify eval.py math and baseline model correctness.
-Integration test (gated by DIREVO_RUN_AI_DEMO=1) runs the full orchestrator
+Integration test (gated by EDEN_RUN_AI_DEMO=1) runs the full orchestrator
 with real AI tools.
 """
 
@@ -100,10 +100,10 @@ class TestEvalEndToEnd:
         assert metrics["rmse"] > 0
 
     def test_eval_writes_report_artifact(self, tmp_path: Path) -> None:
-        """Eval should write a detailed report to .direvo/trial/eval_report.json."""
+        """Eval should write a detailed report to .eden/trial/eval_report.json."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
-        (workspace / ".direvo" / "trial").mkdir(parents=True)
+        (workspace / ".eden" / "trial").mkdir(parents=True)
         shutil.copy(DEMO_DIR / "planner" / "workspace" / "model.py", workspace / "model.py")
         result = subprocess.run(
             [sys.executable, str(DEMO_DIR / "eval.py")],
@@ -112,7 +112,7 @@ class TestEvalEndToEnd:
             text=True,
         )
         assert result.returncode == 0, result.stderr
-        report_path = workspace / ".direvo" / "trial" / "eval_report.json"
+        report_path = workspace / ".eden" / "trial" / "eval_report.json"
         assert report_path.exists()
         report = json.loads(report_path.read_text())
         assert report["n_test"] == 50
@@ -152,10 +152,10 @@ class TestDataGeneration:
 # Full AI integration (opt-in)
 # ---------------------------------------------------------------------------
 
-_SKIP_AI = not (os.environ.get("DIREVO_RUN_AI_DEMO") == "1" and shutil.which("codex") and shutil.which("claude"))
+_SKIP_AI = not (os.environ.get("EDEN_RUN_AI_DEMO") == "1" and shutil.which("codex") and shutil.which("claude"))
 
 
-@pytest.mark.skipif(_SKIP_AI, reason="Requires DIREVO_RUN_AI_DEMO=1, codex, and claude on PATH")
+@pytest.mark.skipif(_SKIP_AI, reason="Requires EDEN_RUN_AI_DEMO=1, codex, and claude on PATH")
 def test_data_fitting_demo(tmp_path: Path) -> None:
     """Run the full data-fitting demo with real AI agents."""
     from eden.orchestrator import Orchestrator, bootstrap
@@ -175,7 +175,7 @@ def test_data_fitting_demo(tmp_path: Path) -> None:
         subprocess.run(cmd, cwd=workspace, check=True, capture_output=True)
 
     # Patch python path
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".eden" / "config.yaml"
     config_text = config_path.read_text().replace("python3", sys.executable)
     config_path.write_text(config_text)
 

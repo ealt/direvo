@@ -60,7 +60,7 @@ def main() -> None:
 
     # Write detailed report to trial artifacts (preserved by the orchestrator).
     # The planner reads this via the artifacts symlink to inform future proposals.
-    report_dir = Path(".direvo/trial")
+    report_dir = Path(".eden/trial")
     if report_dir.exists():
         report = {
             "r_squared": round(score, 6),

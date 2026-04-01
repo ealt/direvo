@@ -166,7 +166,7 @@ def test_runtime_setup_creates_user_runtime_dirs_when_configured(
     runtime_root = tmp_path / "runtime"
     runner = FakeRunner()
     chown_calls: list[tuple[Path, str | None, str | None]] = []
-    monkeypatch.setenv("DIREVO_RUNTIME_DIR", str(runtime_root))
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", str(runtime_root))
     monkeypatch.setattr("os.geteuid", lambda: 0)
     monkeypatch.setattr(
         "shutil.chown",
@@ -194,8 +194,8 @@ def test_runtime_setup_seeds_codex_home_from_auth_mount(
     (auth_home / ".codex").mkdir(parents=True)
     (auth_home / ".codex" / "auth.json").write_text('{"token":"x"}', encoding="utf-8")
 
-    monkeypatch.setenv("DIREVO_RUNTIME_DIR", str(runtime_root))
-    monkeypatch.setenv("DIREVO_AUTH_HOME", str(auth_home))
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", str(runtime_root))
+    monkeypatch.setenv("EDEN_AUTH_HOME", str(auth_home))
     monkeypatch.setattr("os.geteuid", lambda: 0)
     monkeypatch.setattr("shutil.chown", lambda *args, **kwargs: None)
 
@@ -218,8 +218,8 @@ def test_runtime_setup_skips_transient_codex_tmp_from_auth_mount(
     transient_dir.mkdir(parents=True)
     (transient_dir / "apply_patch").write_text("shim\n", encoding="utf-8")
 
-    monkeypatch.setenv("DIREVO_RUNTIME_DIR", str(runtime_root))
-    monkeypatch.setenv("DIREVO_AUTH_HOME", str(auth_home))
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", str(runtime_root))
+    monkeypatch.setenv("EDEN_AUTH_HOME", str(auth_home))
     monkeypatch.setattr("os.geteuid", lambda: 0)
     monkeypatch.setattr("shutil.chown", lambda *args, **kwargs: None)
 
@@ -242,8 +242,8 @@ def test_runtime_setup_skips_broken_codex_symlinks_from_auth_mount(
     (codex_home / "auth.json").write_text('{"token":"x"}', encoding="utf-8")
     (codex_home / "AGENTS.md").symlink_to(codex_home / "missing-target.md")
 
-    monkeypatch.setenv("DIREVO_RUNTIME_DIR", str(runtime_root))
-    monkeypatch.setenv("DIREVO_AUTH_HOME", str(auth_home))
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", str(runtime_root))
+    monkeypatch.setenv("EDEN_AUTH_HOME", str(auth_home))
     monkeypatch.setattr("os.geteuid", lambda: 0)
     monkeypatch.setattr("shutil.chown", lambda *args, **kwargs: None)
 

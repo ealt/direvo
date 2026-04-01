@@ -215,8 +215,8 @@ def _user_exists(user: str) -> bool:
 def _shell_env_prefix(user: str) -> str:
     """Render shell environment assignments for a target user command."""
     assignments: list[str] = []
-    auth_home = os.environ.get("DIREVO_AUTH_HOME")
-    runtime_root = os.environ.get("DIREVO_RUNTIME_DIR")
+    auth_home = os.environ.get("EDEN_AUTH_HOME")
+    runtime_root = os.environ.get("EDEN_RUNTIME_DIR")
     if runtime_root and user.startswith("trial-"):
         user_home = Path(runtime_root) / user / "home"
         user_root = Path(runtime_root) / user

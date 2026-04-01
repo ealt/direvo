@@ -12,7 +12,7 @@ Unix user isolation.
 ./example/data-fitting/run.sh
 ```
 
-That's it. The script builds a Docker image (installs direvo + both CLIs,
+That's it. The script builds a Docker image (installs eden + both CLIs,
 initializes the workspace git repo, copies the experiment) and runs the
 experiment with `--privileged` for user isolation.
 
@@ -31,11 +31,11 @@ no API keys needed.
    regression, polynomials, Fourier features, RBF kernels).
 2. **Orchestrator** claims proposals, creates git worktrees, and runs 3 trials
    in parallel — each under an isolated `trial-{slot}` Unix user.
-3. **Implementer** (Codex) reads `.direvo/trial/plan.md`, modifies `model.py`,
-   and writes `.direvo/trial/notes.md` summarizing what it did.
+3. **Implementer** (Codex) reads `.eden/trial/plan.md`, modifies `model.py`,
+   and writes `.eden/trial/notes.md` summarizing what it did.
 4. **Orchestrator** commits the changes, then runs evaluation as root.
 5. **Evaluator** imports `model.py`, calls `predict()` on the hidden test set,
-   outputs R² and RMSE, and writes `.direvo/trial/eval_report.json`.
+   outputs R² and RMSE, and writes `.eden/trial/eval_report.json`.
 6. **Planner** is notified. It reads trial artifacts (plan, notes, eval report)
    and continues its Claude session to propose the next strategy — parented on
    the best trial's commit.
@@ -82,7 +82,7 @@ Mounted paths (when they exist on the host):
 ## Directory Structure
 
 ```
-.direvo/config.yaml        Config: 3 parallel trials, 15 max, R² + RMSE metrics
+.eden/config.yaml        Config: 3 parallel trials, 15 max, R² + RMSE metrics
 eval.py                    Evaluator: scores on hidden test set, writes report
 generate_data.py           Regenerate train/test data (deterministic, seed=42)
 train.npz                  Training data (granted to implementer)

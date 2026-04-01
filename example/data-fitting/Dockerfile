@@ -20,7 +20,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 # Codex CLI
 RUN npm install -g @openai/codex
 
-# Install direvo
+# Install eden
 WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
 COPY docs /app/docs
@@ -28,8 +28,8 @@ COPY src /app/src
 RUN pip install --no-cache-dir '.[dev]'
 
 # Copy shared entrypoint
-COPY docker/entrypoint.sh /usr/local/bin/direvo-entrypoint
-RUN chmod 0755 /usr/local/bin/direvo-entrypoint
+COPY docker/entrypoint.sh /usr/local/bin/eden-entrypoint
+RUN chmod 0755 /usr/local/bin/eden-entrypoint
 
 # Demo-specific entrypoint (propagates mounted auth to trial users)
 COPY example/data-fitting/auth-setup.sh /usr/local/bin/demo-entrypoint
@@ -39,14 +39,17 @@ RUN chmod 0755 /usr/local/bin/demo-entrypoint
 COPY example/data-fitting /experiment
 WORKDIR /experiment
 
+# Ensure deterministic demo data exists even if the checkout omitted generated npz files.
+RUN python3 generate_data.py
+
 # Initialize the workspace git repo (can't live on the host because it would
 # create a nested git repo inside the source tree)
 RUN cd planner/workspace \
     && git init -q \
-    && git config user.email "direvo@experiment" \
-    && git config user.name "direvo" \
+    && git config user.email "eden@experiment" \
+    && git config user.name "eden" \
     && git add . \
     && git commit -q -m "initial baseline model"
 
 ENTRYPOINT ["demo-entrypoint"]
-CMD ["run", "--config", "/experiment/.direvo/config.yaml"]
+CMD ["run", "--config", "/experiment/.eden/config.yaml"]
