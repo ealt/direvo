@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 
-from direvo.logging import configure_logging, log_event
+from eden.logging import configure_logging, log_event
 
 
 def test_log_event_includes_session_id(tmp_path: Path) -> None:

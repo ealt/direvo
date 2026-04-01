@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from direvo.config import load_config
-from direvo.db import DatabaseManager
-from direvo.git_manager import GitManager
-from direvo.runtime import RuntimeSetup
-from direvo.worktree import secure_worktree_root
+from eden.config import load_config
+from eden.db import DatabaseManager
+from eden.git_manager import GitManager
+from eden.runtime import RuntimeSetup
+from eden.worktree import secure_worktree_root
 
-if os.geteuid() != 0 or os.environ.get("DIREVO_RUN_PRIVILEGED_TESTS") != "1":
+if os.geteuid() != 0 or os.environ.get("EDEN_RUN_PRIVILEGED_TESTS") != "1":
     pytestmark = pytest.mark.skip(
-        reason="requires root in an ephemeral environment and DIREVO_RUN_PRIVILEGED_TESTS=1"
+        reason="requires root in an ephemeral environment and EDEN_RUN_PRIVILEGED_TESTS=1"
     )
 
 
@@ -33,7 +33,7 @@ def _su_status(user: str, command: str) -> int:
 def test_runtime_enforces_permission_boundaries(tmp_path: Path) -> None:
     experiment_root = tmp_path / "experiment"
     workspace = experiment_root / "planner" / "workspace"
-    (experiment_root / ".direvo").mkdir(parents=True)
+    (experiment_root / ".eden").mkdir(parents=True)
     workspace.mkdir(parents=True)
     (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
     eval_script = experiment_root / "evaluate.sh"
@@ -46,7 +46,7 @@ def test_runtime_enforces_permission_boundaries(tmp_path: Path) -> None:
     _run(["git", "add", "."], cwd=workspace)
     _run(["git", "commit", "-m", "seed"], cwd=workspace)
 
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".eden" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """

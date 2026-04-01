@@ -1,6 +1,6 @@
 # Style Guide
 
-This document defines the code formatting and style conventions for direvo.
+This document defines the code formatting and style conventions for eden.
 
 ## Code Formatting
 

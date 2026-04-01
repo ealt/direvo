@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from direvo.config import load_config
-from direvo.db import DatabaseManager
-from direvo.models import ProposalStatus
+from eden.config import load_config
+from eden.db import DatabaseManager
+from eden.models import ProposalStatus
 
-if shutil.which("docker") is None or os.environ.get("DIREVO_RUN_DOCKER_TESTS") != "1":
-    pytestmark = pytest.mark.skip(reason="requires Docker and DIREVO_RUN_DOCKER_TESTS=1")
+if shutil.which("docker") is None or os.environ.get("EDEN_RUN_DOCKER_TESTS") != "1":
+    pytestmark = pytest.mark.skip(reason="requires Docker and EDEN_RUN_DOCKER_TESTS=1")
 
 
 def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -24,7 +24,7 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
     experiment_root = tmp_path / "experiment"
     workspace = experiment_root / "planner" / "workspace"
     workspace.mkdir(parents=True)
-    (experiment_root / ".direvo").mkdir(parents=True)
+    (experiment_root / ".eden").mkdir(parents=True)
     (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
 
     eval_script = experiment_root / "evaluate.sh"
@@ -36,8 +36,8 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
         textwrap.dedent(
             """#!/bin/sh
             printf 'changed\\n' > code.txt
-            mkdir -p .direvo/trial
-            printf '%s\\n' "$*" > .direvo/trial/implementation.md
+            mkdir -p .eden/trial
+            printf '%s\\n' "$*" > .eden/trial/implementation.md
             """
         ),
         encoding="utf-8",
@@ -51,7 +51,7 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
     _run(["git", "commit", "-m", "seed"], cwd=workspace)
     head_sha = _run(["git", "rev-parse", "HEAD"], cwd=workspace).stdout.strip()
 
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".eden" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -90,7 +90,7 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
         status=ProposalStatus.READY,
     )
 
-    image_tag = f"direvo-test:{uuid.uuid4().hex[:8]}"
+    image_tag = f"eden-test:{uuid.uuid4().hex[:8]}"
     try:
         _run(["docker", "build", "-t", image_tag, "."], cwd=repo_root)
         subprocess.run(
@@ -102,7 +102,7 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
                 f"{experiment_root}:/experiment",
                 image_tag,
                 "--config",
-                "/experiment/.direvo/config.yaml",
+                "/experiment/.eden/config.yaml",
             ],
             cwd=repo_root,
             check=True,
@@ -116,4 +116,4 @@ def test_docker_run_smoke(tmp_path: Path) -> None:
     assert trial_row is not None
     assert trial_row["status"] == "success"
     assert trial_row["commit_sha"]
-    assert (experiment_root / ".direvo" / "artifacts" / "trial-1" / "implementation.md").exists()
+    assert (experiment_root / ".eden" / "artifacts" / "trial-1" / "implementation.md").exists()

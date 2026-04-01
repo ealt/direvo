@@ -1,4 +1,4 @@
-"""Command-line interface for DirEvo."""
+"""Command-line interface for EDEN."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .orchestrator import Orchestrator, bootstrap
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
-    parser = argparse.ArgumentParser(prog="direvo")
+    parser = argparse.ArgumentParser(prog="eden")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     for command in ("run", "doctor"):

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from direvo.config import load_config
-from direvo.runtime import RuntimeSetup, SystemRunner
+from eden.config import load_config
+from eden.runtime import RuntimeSetup, SystemRunner
 
 
 class FakeRunner(SystemRunner):
@@ -26,8 +26,8 @@ class FakeRunner(SystemRunner):
 
 def _write_config(tmp_path: Path) -> Path:
     experiment_root = tmp_path / "experiment"
-    (experiment_root / ".direvo").mkdir(parents=True)
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    (experiment_root / ".eden").mkdir(parents=True)
+    config_path = experiment_root / ".eden" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -96,9 +96,9 @@ def test_runtime_setup_creates_users_and_applies_permissions(
     assert ["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "trial-0"] in runner.commands
     assert ["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "trial-1"] in runner.commands
     assert config.experiment_root.stat().st_mode & 0o777 == 0o711
-    assert (config.experiment_root / ".direvo").stat().st_mode & 0o777 == 0o711
+    assert (config.experiment_root / ".eden").stat().st_mode & 0o777 == 0o711
     assert config.planner_root.stat().st_mode & 0o777 == 0o750
-    assert (config.planner_root / ".direvo").stat().st_mode & 0o777 == 0o750
+    assert (config.planner_root / ".eden").stat().st_mode & 0o777 == 0o750
     assert (config.workspace_root / "worktrees").stat().st_mode & 0o777 == 0o755
     assert git_dir.stat().st_mode & 0o777 == 0o750
     assert config.proposals_dir.stat().st_mode & 0o777 == 0o770

@@ -26,5 +26,5 @@ docker run --rm \
     apt-get update
     apt-get install -y --no-install-recommends git passwd
     python3 -m pip install --no-cache-dir -e . pytest PyYAML
-    DIREVO_RUN_PRIVILEGED_TESTS=1 PYTHONPATH=src python3 -m pytest ${pytest_args[*]}
+    EDEN_RUN_PRIVILEGED_TESTS=1 PYTHONPATH=src python3 -m pytest ${pytest_args[*]}
   "

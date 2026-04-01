@@ -40,11 +40,11 @@ class RuntimeSetup:
         self._ensure_ancestor_traversal(config.planner_root)
         self._ensure_ancestor_traversal(config.workspace_root)
         self._apply_directory_permissions(config.experiment_root, user="root", group="root", mode=0o711)
-        self._apply_directory_permissions(config.experiment_root / ".direvo", user="root", group="root", mode=0o711)
+        self._apply_directory_permissions(config.experiment_root / ".eden", user="root", group="root", mode=0o711)
         self._apply_directory_permissions(config.planner_root, user="planner", group="planner", mode=0o751)
-        self._apply_directory_permissions(config.planner_root / ".direvo", user="planner", group="planner", mode=0o750)
+        self._apply_directory_permissions(config.planner_root / ".eden", user="planner", group="planner", mode=0o750)
         self._apply_directory_permissions(config.workspace_root, user="root", group="planner", mode=0o751)
-        self._apply_directory_permissions(config.workspace_root / ".direvo", user="root", group="planner", mode=0o750)
+        self._apply_directory_permissions(config.workspace_root / ".eden", user="root", group="planner", mode=0o750)
         self._apply_mode(config.workspace_root / "worktrees", 0o755)
         self._apply_tree_permissions(
             config.workspace_root / ".git",
@@ -73,9 +73,9 @@ class RuntimeSetup:
 
     def _ensure_directories(self, config: SessionConfig) -> None:
         """Create the directory layout needed by the runtime."""
-        (config.experiment_root / ".direvo").mkdir(parents=True, exist_ok=True)
-        (config.planner_root / ".direvo").mkdir(parents=True, exist_ok=True)
-        (config.workspace_root / ".direvo").mkdir(parents=True, exist_ok=True)
+        (config.experiment_root / ".eden").mkdir(parents=True, exist_ok=True)
+        (config.planner_root / ".eden").mkdir(parents=True, exist_ok=True)
+        (config.workspace_root / ".eden").mkdir(parents=True, exist_ok=True)
         (config.workspace_root / "worktrees").mkdir(parents=True, exist_ok=True)
         config.proposals_dir.mkdir(parents=True, exist_ok=True)
         config.artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -171,7 +171,7 @@ class RuntimeSetup:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the runtime setup helper."""
-    parser = argparse.ArgumentParser(prog="python -m direvo.runtime")
+    parser = argparse.ArgumentParser(prog="python -m eden.runtime")
     parser.add_argument("--config", required=True)
     args = parser.parse_args(argv)
     config = load_config(args.config)

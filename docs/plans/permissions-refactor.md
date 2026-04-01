@@ -2,13 +2,13 @@
 
 ## Context
 
-The current direvo architecture has two directory levels: experiment_root (everything) and workspace_root (git repo). All scripts, databases, proposals, and artifacts live at experiment_root, meaning the planner subprocess has access to evaluation scripts and test data — enabling reward hacking by frontier models. We need a three-level ownership hierarchy with filesystem-enforced isolation, plus a rename of `execute_command` → `implement_command` to better describe the actor's role.
+The current eden architecture has two directory levels: experiment_root (everything) and workspace_root (git repo). All scripts, databases, proposals, and artifacts live at experiment_root, meaning the planner subprocess has access to evaluation scripts and test data — enabling reward hacking by frontier models. We need a three-level ownership hierarchy with filesystem-enforced isolation, plus a rename of `execute_command` → `implement_command` to better describe the actor's role.
 
 ## Three-Level Ownership Model
 
 ```
 experiment_root/                    # Level 1: orchestrator owns
-├── .direvo/
+├── .eden/
 │   ├── config.yaml                 # experiment definition
 │   ├── results.db                  # orchestrator writes, planner reads (automatic)
 │   ├── artifacts/                  # orchestrator writes, planner reads (automatic)
@@ -17,11 +17,11 @@ experiment_root/                    # Level 1: orchestrator owns
 │
 └── planner_root/                   # Level 2: planner owns
     ├── [planner scripts]
-    ├── .direvo/
+    ├── .eden/
     │   ├── proposals.db            # planner writes proposals
     │   ├── proposals/              # planner writes plan docs
-    │   ├── results.db → ../../.direvo/results.db      # auto-symlink
-    │   └── artifacts/ → ../../.direvo/artifacts/      # auto-symlink
+    │   ├── results.db → ../../.eden/results.db      # auto-symlink
+    │   └── artifacts/ → ../../.eden/artifacts/      # auto-symlink
     │
     └── workspace/                  # Level 3: implementer owns
         └── .git/
@@ -38,7 +38,7 @@ experiment_root/                    # Level 1: orchestrator owns
 - Planner: sees planner_root + workspace. No access to experiment_root.
 - Implementer (trial-{slot}): sees only their worktree. No access above.
 
-**Automatic infrastructure access**: The system automatically symlinks core direvo infrastructure (results.db, artifacts/) from experiment_root into planner_root so the planner can read them without explicit config. These are not experiment-specific — every experiment needs them.
+**Automatic infrastructure access**: The system automatically symlinks core eden infrastructure (results.db, artifacts/) from experiment_root into planner_root so the planner can read them without explicit config. These are not experiment-specific — every experiment needs them.
 
 **Command execution model**:
 - `implement_command`: runs as **trial-{slot}** (CWD=worktree). Grant symlinks are present in the worktree during this phase. If the command needs a script file, the user places it on PATH, in the workspace, or explicitly grants it via `file_permissions`.
@@ -56,7 +56,7 @@ file_permissions:
 
 **All grants are read-only.** There is no `rw` mode — writable cross-level grants would let agents mutate shared state outside their ownership scope. If an agent needs writable access to external data, the experiment should copy it into the agent's scope instead.
 
-**Grant validation**: paths must be relative (no `..` or absolute), must not collide with `.direvo/` or other system-managed paths, and must reference existing files.
+**Grant validation**: paths must be relative (no `..` or absolute), must not collide with `.eden/` or other system-managed paths, and must reference existing files.
 
 **Grant mechanism**: orchestrator creates symlinks in the target's scope during bootstrap (planner grants) or trial preparation (implementer grants). Directory traversal (mode 711) on experiment_root allows symlink resolution without directory listing.
 
@@ -68,17 +68,17 @@ file_permissions:
 
 Pure mechanical rename, no behavior change. Establishes the new naming before structural changes.
 
-### `src/direvo/models.py`
+### `src/eden/models.py`
 - `execute_command: str` → `implement_command: str`
 - `execution_timeout_sec` → `implement_timeout_sec`
 
-### `src/direvo/config.py`
+### `src/eden/config.py`
 - `_validate_execute_command()` → `_validate_implement_command()`
 - YAML field: `execute_command` → `implement_command`
 - YAML field: `execution_timeout_sec` → `implement_timeout_sec`
 - All references in `load_config()` return value
 
-### `src/direvo/execution.py`
+### `src/eden/execution.py`
 - `ExecutionManager` → `ImplementationManager`
 - `run_execution()` → `run_implementation()`
 - `ExecutionResult` → `ImplementationResult`
@@ -86,7 +86,7 @@ Pure mechanical rename, no behavior change. Establishes the new naming before st
 - `_render_execute_command()` → `_render_implement_command()`
 - Constructor kwarg: `execute_command=` → `implement_command=`
 
-### `src/direvo/orchestrator.py`
+### `src/eden/orchestrator.py`
 - `execution_manager` → `implementation_manager`
 - `ExecutionManager` import → `ImplementationManager`
 - `ExecutionResult` → `ImplementationResult` (if referenced)
@@ -95,7 +95,7 @@ Pure mechanical rename, no behavior change. Establishes the new naming before st
 - `execution_result` variable → `implementation_result`
 - Log event `"execution_complete"` → `"implementation_complete"`
 
-### `src/direvo/cli.py`
+### `src/eden/cli.py`
 - Doctor checks: `execute_command` → `implement_command`
 
 ### All test files
@@ -105,7 +105,7 @@ Pure mechanical rename, no behavior change. Establishes the new naming before st
 - Files: test_config.py, test_execution.py, test_orchestrator.py, test_cli.py, test_smoke.py, test_entrypoint.py, test_runtime.py, test_docker_integration.py, test_permission_boundary.py, test_e2e.py
 
 ### Fixture files
-- `tests/fixtures/experiment/.direvo/config.yaml`: `execute_command` → `implement_command`
+- `tests/fixtures/experiment/.eden/config.yaml`: `execute_command` → `implement_command`
 - `tests/fixtures/experiment/execute.py` → rename to `implement.py`
 
 ### Documentation
@@ -115,10 +115,10 @@ Pure mechanical rename, no behavior change. Establishes the new naming before st
 
 ## Phase 2: Add `planner_root` to config and model
 
-### `src/direvo/models.py`
+### `src/eden/models.py`
 - Add `planner_root: Path` field to `SessionConfig` (after `experiment_root`)
 
-### `src/direvo/config.py`
+### `src/eden/config.py`
 - Parse `planner_root` field (required string, resolve relative to experiment_root)
 - Change resolution bases:
   - `proposals_db`: resolve against `planner_root` (was experiment_root)
@@ -130,13 +130,13 @@ Pure mechanical rename, no behavior change. Establishes the new naming before st
 - `implement_command`: stays experiment_root
 - `evaluate_command`: stays experiment_root
 
-### `src/direvo/orchestrator.py`
+### `src/eden/orchestrator.py`
 - `bootstrap()`:
-  - Create `experiment_root / ".direvo"` (config, results.db, artifacts, session.log)
-  - Create `planner_root / ".direvo"` (proposals.db, proposals/)
-  - Create auto-symlinks in `planner_root/.direvo/`:
-    - `results.db → experiment_root/.direvo/results.db`
-    - `artifacts → experiment_root/.direvo/artifacts`
+  - Create `experiment_root / ".eden"` (config, results.db, artifacts, session.log)
+  - Create `planner_root / ".eden"` (proposals.db, proposals/)
+  - Create auto-symlinks in `planner_root/.eden/`:
+    - `results.db → experiment_root/.eden/results.db`
+    - `artifacts → experiment_root/.eden/artifacts`
   - Validate containment: planner_root under experiment_root, workspace under planner_root
 - `ensure_trial_directories()`: proposals_dir under planner_root, artifacts_dir under experiment_root
 - `_run_claimed_trial()` — restructure trial flow:
@@ -154,23 +154,23 @@ Pure mechanical rename, no behavior change. Establishes the new naming before st
 
 ## Phase 3: Update planner CWD
 
-### `src/direvo/planner.py`
+### `src/eden/planner.py`
 - `SubprocessPlannerSession.__init__`: rename `experiment_root` param → `planner_root`
 - `self.experiment_root` → `self.planner_root` throughout
 - CWD in `start()`: `cwd=self.planner_root`
 - CWD in `_planner_command()`: `cd {self.planner_root}`
 
-### `src/direvo/orchestrator.py`
+### `src/eden/orchestrator.py`
 - `create_planner_session()` call: pass `planner_root=config.planner_root` instead of `experiment_root=config.experiment_root`
 
-### `src/direvo/planner.py` — `create_planner_session()`
+### `src/eden/planner.py` — `create_planner_session()`
 - Rename `experiment_root` param → `planner_root`
 
 ---
 
 ## Phase 4: Split DB journal modes
 
-### `src/direvo/db.py`
+### `src/eden/db.py`
 - Add `results_journal_mode: str = "DELETE"` and `proposals_journal_mode: str = "WAL"` to `DatabaseManager`
 - Or simpler: add a `journal_mode` parameter to `_connect()` and pass the appropriate mode per DB
 - `_connect()` currently does `conn.execute("PRAGMA journal_mode=WAL")` unconditionally
@@ -198,7 +198,7 @@ Actually simplest: store journal modes in a dict keyed by path, set during init.
 
 ## Phase 5: File permissions grants
 
-### `src/direvo/models.py`
+### `src/eden/models.py`
 - Add `FilePermissionGrant` dataclass:
   ```python
   @dataclass(frozen=True)
@@ -209,12 +209,12 @@ Actually simplest: store journal modes in a dict keyed by path, set during init.
 - Add `file_permissions: tuple[FilePermissionGrant, ...]` to `SessionConfig` (default empty tuple)
 - All grants are read-only by design (no mode field needed)
 
-### `src/direvo/config.py`
+### `src/eden/config.py`
 - Parse `file_permissions` list from YAML
 - Validate each entry: path is a string, grant is `"planner"` or `"implementer"`
 - Actor must be "planner" or "implementer" (no mode field — all grants are read-only)
 
-### `src/direvo/orchestrator.py` — bootstrap
+### `src/eden/orchestrator.py` — bootstrap
 - After directory creation, process planner grants:
   - For each grant where `actor == "planner"`:
     - Source: `experiment_root / grant.path`
@@ -222,7 +222,7 @@ Actually simplest: store journal modes in a dict keyed by path, set during init.
     - Create parent dirs at target, create symlink
 - Store implementer grants for use during trial preparation
 
-### `src/direvo/orchestrator.py` — grant lifecycle
+### `src/eden/orchestrator.py` — grant lifecycle
 - **Create** (in `_run_claimed_trial`, before implement):
   - For each grant where `actor == "implementer"`:
     - Source: `experiment_root / grant.path`
@@ -233,7 +233,7 @@ Actually simplest: store journal modes in a dict keyed by path, set during init.
   - Delete all grant symlinks created in the create step
   - Grants are transient — they must not be committed to the trial branch
 
-### New helper: `src/direvo/grants.py` (or add to `worktree.py`)
+### New helper: `src/eden/grants.py` (or add to `worktree.py`)
 - `create_grant_symlinks(grants, source_root, target_root)` — creates symlinks for a list of grants
 - `create_worktree_grant_symlinks(grants, source_root, worktree_path)` — per-trial symlinks
 
@@ -241,14 +241,14 @@ Actually simplest: store journal modes in a dict keyed by path, set during init.
 
 ## Phase 6: Runtime permission setup
 
-### `src/direvo/runtime.py` — `prepare()`
+### `src/eden/runtime.py` — `prepare()`
 Major refactor of the permission setup:
 
 **Directory ownership (three levels):**
 ```python
 # Level 1: experiment_root — root-only, traverse-only for others
 self._apply_directory_permissions(config.experiment_root, user="root", group="root", mode=0o711)
-self._apply_directory_permissions(config.experiment_root / ".direvo", user="root", group="root", mode=0o711)
+self._apply_directory_permissions(config.experiment_root / ".eden", user="root", group="root", mode=0o711)
 
 # Level 1 infrastructure readable by planner (for auto-symlinks)
 self._apply_tree_permissions(config.artifacts_dir, user="root", group="planner",
@@ -289,7 +289,7 @@ self._apply_directory_permissions(config.workspace_root, user="root", group="pla
 - proposals_db/proposals_dir resolve relative to planner_root
 - results_db/artifacts_dir resolve relative to experiment_root
 - `plan_command` resolves against planner_root
-- `file_permissions` parsing and validation (reject `..`, absolute paths, `.direvo/` collisions)
+- `file_permissions` parsing and validation (reject `..`, absolute paths, `.eden/` collisions)
 - Invalid file_permissions entries raise ConfigError
 
 **test_planner.py:**

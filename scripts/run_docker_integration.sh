@@ -11,8 +11,8 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 if command -v uv >/dev/null 2>&1; then
-  DIREVO_RUN_DOCKER_TESTS=1 uv run -m pytest -q tests/test_docker_integration.py -vv "$@"
+  EDEN_RUN_DOCKER_TESTS=1 uv run -m pytest -q tests/test_docker_integration.py -vv "$@"
   exit 0
 fi
 
-DIREVO_RUN_DOCKER_TESTS=1 PYTHONPATH=src python3 -m pytest -q tests/test_docker_integration.py -vv "$@"
+EDEN_RUN_DOCKER_TESTS=1 PYTHONPATH=src python3 -m pytest -q tests/test_docker_integration.py -vv "$@"

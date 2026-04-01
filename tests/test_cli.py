@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from direvo.cli import doctor
+from eden.cli import doctor
 
 
 def _run(command: list[str], cwd: Path) -> None:
@@ -16,7 +16,7 @@ def experiment(tmp_path: Path) -> tuple[Path, Path]:
     experiment_root = tmp_path / "experiment"
     planner_root = experiment_root / "planner"
     workspace = planner_root / "workspace"
-    (experiment_root / ".direvo").mkdir(parents=True)
+    (experiment_root / ".eden").mkdir(parents=True)
     workspace.mkdir(parents=True)
     (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
     eval_script = experiment_root / "evaluate.sh"
@@ -32,7 +32,7 @@ def experiment(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _write_config(experiment_root: Path) -> Path:
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".eden" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """

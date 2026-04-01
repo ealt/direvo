@@ -3,9 +3,9 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-from direvo.config import load_config
-from direvo.db import DatabaseManager
-from direvo.models import ProposalStatus
+from eden.config import load_config
+from eden.db import DatabaseManager
+from eden.models import ProposalStatus
 
 
 def _run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -16,7 +16,7 @@ def _init_workspace(tmp_path: Path) -> Path:
     experiment_root = tmp_path / "experiment"
     workspace = experiment_root / "planner" / "workspace"
     workspace.mkdir(parents=True)
-    (experiment_root / ".direvo").mkdir(parents=True)
+    (experiment_root / ".eden").mkdir(parents=True)
     (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
     eval_script = experiment_root / "evaluate.sh"
     eval_script.write_text("#!/bin/sh\nprintf '{\"test_pass_rate\": 1.0}\\n'\n", encoding="utf-8")
@@ -33,8 +33,8 @@ def _init_workspace(tmp_path: Path) -> Path:
         textwrap.dedent(
             """#!/bin/sh
             printf 'changed\\n' > code.txt
-            mkdir -p .direvo/trial
-            printf '%s\\n' "$*" > .direvo/trial/implementation.md
+            mkdir -p .eden/trial
+            printf '%s\\n' "$*" > .eden/trial/implementation.md
             """
         ),
         encoding="utf-8",
@@ -56,7 +56,7 @@ def test_entrypoint_requires_arguments() -> None:
     )
 
     assert result.returncode == 2
-    assert "usage: direvo-entrypoint" in result.stderr
+    assert "usage: eden-entrypoint" in result.stderr
 
 
 def test_entrypoint_run_defaults_from_flag_only_invocation(tmp_path: Path) -> None:
@@ -66,7 +66,7 @@ def test_entrypoint_run_defaults_from_flag_only_invocation(tmp_path: Path) -> No
     workspace = experiment_root / "planner" / "workspace"
     head_sha = _run(["git", "rev-parse", "HEAD"], cwd=workspace).stdout.strip()
 
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".eden" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -128,7 +128,7 @@ def test_entrypoint_doctor_skips_runtime_setup(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     experiment_root = _init_workspace(tmp_path)
     workspace = experiment_root / "planner" / "workspace"
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".eden" / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -162,7 +162,7 @@ def test_entrypoint_doctor_skips_runtime_setup(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert not (experiment_root / ".direvo" / "results.db").exists()
+    assert not (experiment_root / ".eden" / "results.db").exists()
     assert not (workspace / "worktrees").exists()
 
 

@@ -1,4 +1,4 @@
-# DirEvo
+# EDEN
 
 An orchestration system that runs concurrent research trials inside Docker containers.
 
@@ -16,7 +16,7 @@ An orchestration system that runs concurrent research trials inside Docker conta
 
 3. Validate a workspace config:
    ```bash
-   uv run direvo doctor --config /path/to/.direvo/config.yaml
+   uv run eden doctor --config /path/to/.eden/config.yaml
    ```
 
 ## How It Works

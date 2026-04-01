@@ -40,7 +40,7 @@ def configure_logging(log_path: Path, *, session_id: str | None = None) -> loggi
         Configured project logger.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("direvo")
+    logger = logging.getLogger("eden")
     logger.setLevel(logging.INFO)
     _close_handlers(logger)
     logger.handlers.clear()

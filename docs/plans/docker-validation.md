@@ -38,8 +38,8 @@ Recent privileged-suite fixes already folded into the repo:
 The two skipped tests in the normal non-Docker host suite are the
 environment-gated validations covered by this runbook:
 
-- [test_docker_integration.py](/direvo/tests/test_docker_integration.py)
-- [test_permission_boundary.py](/direvo/tests/test_permission_boundary.py)
+- [test_docker_integration.py](/eden/tests/test_docker_integration.py)
+- [test_permission_boundary.py](/eden/tests/test_permission_boundary.py)
 
 ## Purpose
 
@@ -65,8 +65,8 @@ The agent running these steps needs:
 
 Run the validations through these repo scripts:
 
-- [run_docker_integration.sh](/direvo/scripts/run_docker_integration.sh)
-- [run_privileged_validation.sh](/direvo/scripts/run_privileged_validation.sh)
+- [run_docker_integration.sh](/eden/scripts/run_docker_integration.sh)
+- [run_privileged_validation.sh](/eden/scripts/run_privileged_validation.sh)
 
 Do not retype the long Docker commands unless you are debugging the scripts
 themselves.
@@ -113,7 +113,7 @@ What this does:
 - runs the image with:
   - mounted `/workspace`
   - real entrypoint
-  - config at `/workspace/.direvo/config.yaml`
+  - config at `/workspace/.eden/config.yaml`
 - verifies:
   - successful trial row in `results.db`
   - committed artifact copy exists
@@ -133,7 +133,7 @@ If it fails, capture:
 - full pytest output
 - `docker build` stderr/stdout
 - `docker run` stderr/stdout
-- contents of `/workspace/.direvo/session.log` from the temp workspace
+- contents of `/workspace/.eden/session.log` from the temp workspace
 
 ## Step 2: Privileged Permission-Boundary Test
 
@@ -176,8 +176,8 @@ If it fails, capture:
 - full pytest output
 - `ls -ld` for:
   - `.git`
-  - `.direvo/results.db`
-  - `.direvo/proposals.db`
+  - `.eden/results.db`
+  - `.eden/proposals.db`
   - `worktrees/wt-0`
   - `worktrees/wt-1`
 - `id planner`

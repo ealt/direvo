@@ -4,10 +4,10 @@ import sys
 import textwrap
 from pathlib import Path
 
-from direvo.config import load_config
-from direvo.db import DatabaseManager
-from direvo.models import ProposalStatus
-from direvo.runtime import RuntimeSetup
+from eden.config import load_config
+from eden.db import DatabaseManager
+from eden.models import ProposalStatus
+from eden.runtime import RuntimeSetup
 
 
 def _run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -17,7 +17,7 @@ def _run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> su
 def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
     experiment_root = tmp_path / "experiment"
     workspace = experiment_root / "planner" / "workspace"
-    (experiment_root / ".direvo").mkdir(parents=True)
+    (experiment_root / ".eden").mkdir(parents=True)
     workspace.mkdir(parents=True)
     (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
 
@@ -33,14 +33,14 @@ def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
     _run(["git", "config", "user.name", "Test User"], cwd=workspace)
     _run(["git", "add", "."], cwd=workspace)
     _run(["git", "commit", "-m", "seed"], cwd=workspace)
-    config_path = experiment_root / ".direvo" / "config.yaml"
+    config_path = experiment_root / ".eden" / "config.yaml"
     fake_claude = workspace / "fake-implement.sh"
     fake_claude.write_text(
         textwrap.dedent(
             """#!/bin/sh
             printf 'changed\\n' > code.txt
-            mkdir -p .direvo/trial
-            printf '%s\\n' "$*" > .direvo/trial/implementation.md
+            mkdir -p .eden/trial
+            printf '%s\\n' "$*" > .eden/trial/implementation.md
             """
         ),
         encoding="utf-8",
@@ -95,12 +95,12 @@ def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
     env["PYTHONPATH"] = str(repo_root / "src")
 
     _run(
-        [sys.executable, "-m", "direvo.cli", "doctor", "--config", str(config_path)],
+        [sys.executable, "-m", "eden.cli", "doctor", "--config", str(config_path)],
         cwd=repo_root,
         env=env,
     )
     _run(
-        [sys.executable, "-m", "direvo.cli", "run", "--config", str(config_path)],
+        [sys.executable, "-m", "eden.cli", "run", "--config", str(config_path)],
         cwd=repo_root,
         env=env,
     )
@@ -114,9 +114,9 @@ def test_cli_doctor_and_run_smoke(tmp_path: Path) -> None:
     assert proposal_row is not None
     assert proposal_row["status"] == "completed"
 
-    artifact_plan = experiment_root / ".direvo" / "artifacts" / "trial-1" / "plan.md"
-    artifact_impl = experiment_root / ".direvo" / "artifacts" / "trial-1" / "implementation.md"
-    session_log = experiment_root / ".direvo" / "session.log"
+    artifact_plan = experiment_root / ".eden" / "artifacts" / "trial-1" / "plan.md"
+    artifact_impl = experiment_root / ".eden" / "artifacts" / "trial-1" / "implementation.md"
+    session_log = experiment_root / ".eden" / "session.log"
     assert artifact_plan.exists()
     assert artifact_impl.exists()
     assert session_log.exists()

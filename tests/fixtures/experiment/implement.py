@@ -8,11 +8,11 @@ from __future__ import annotations
 import json
 import os
 
-_LOG_DIR = os.environ.get("DIREVO_LOG_DIR")
+_LOG_DIR = os.environ.get("EDEN_LOG_DIR")
 
 
 def _log(**fields: object) -> None:
-    """Append a JSON log line to execute.log if DIREVO_LOG_DIR is set."""
+    """Append a JSON log line to execute.log if EDEN_LOG_DIR is set."""
     if _LOG_DIR is None:
         return
     with open(os.path.join(_LOG_DIR, "execute.log"), "a") as f:
@@ -27,7 +27,7 @@ def _read_seeds() -> list[str]:
 
 def parse_plan() -> str:
     """Parse the seed from the trial plan document."""
-    with open(".direvo/trial/plan.md") as file:
+    with open(".eden/trial/plan.md") as file:
         return file.read().split()[-1].strip()
 
 

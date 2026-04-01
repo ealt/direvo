@@ -12,18 +12,18 @@ This file provides guidance to AI agents working with this repository.
 | `uv run ruff check .` | Lint Python code |
 | `uv run ruff check --fix .` | Lint and auto-fix |
 | `uv run pyright` | Static type checking |
-| `uv run direvo doctor --config <path>` | Validate a workspace config |
+| `uv run eden doctor --config <path>` | Validate a workspace config |
 | `./scripts/run_docker_integration.sh` | Docker smoke test |
 | `./scripts/run_privileged_validation.sh` | Root-only container validation |
 
 ## Architecture Overview
 
-DirEvo is an orchestration system that runs concurrent research trials inside a single Docker container. A **planner** proposes experiments via a shared SQLite database, and the **orchestrator** dispatches them as parallel git worktrees, each executed by an isolated Linux user.
+EDEN is an orchestration system that runs concurrent research trials inside a single Docker container. A **planner** proposes experiments via a shared SQLite database, and the **orchestrator** dispatches them as parallel git worktrees, each executed by an isolated Linux user.
 
 ### Experiment Root, Planner Root, And Workspace Root
 
 The **experiment root** is the top-level directory (inferred from the config path
-as the parent of `.direvo/`). It contains shared session state and acts as the
+as the parent of `.eden/`). It contains shared session state and acts as the
 outer trust boundary.
 
 The **planner root** is configured by `planner_root`, must live under the
@@ -68,8 +68,8 @@ The system runs inside Docker with multiple Linux users created at container sta
 ### Directory Structure
 
 ```
-direvo/
-├── src/direvo/   # Core package
+eden/
+├── src/eden/   # Core package
 │   ├── sql/            # SQL schema templates
 │   ├── cli.py          # CLI entry point
 │   ├── orchestrator.py # Async dispatch loop
@@ -96,7 +96,7 @@ An experiment directory (e.g., `tests/fixtures/experiment/`) has this layout:
 
 ```
 experiment/              # experiment_root
-├── .direvo/
+├── .eden/
 │   └── config.yaml
 ├── eval.py              # evaluation script (experiment-scoped)
 ├── implement.py         # implementer entry script (experiment-scoped)
@@ -148,4 +148,4 @@ For detailed formatting rules, see [STYLE_GUIDE.md](STYLE_GUIDE.md).
 
 ## Configuration
 
-Workspace config lives at `.direvo/config.yaml`. See `docs/plans/v0.md` for the full configuration contract. Treat `docs/plans/v0.md` as the implementation contract unless code intentionally updates it.
+Workspace config lives at `.eden/config.yaml`. See `docs/plans/v0.md` for the full configuration contract. Treat `docs/plans/v0.md` as the implementation contract unless code intentionally updates it.
