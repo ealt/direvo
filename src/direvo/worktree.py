@@ -75,7 +75,7 @@ def secure_worktree_root(worktree_path: Path, user: str) -> None:
     if os.geteuid() != 0:
         return
     if chown_recursive(worktree_path, user):
-        worktree_path.chmod(0o700)
+        _chmod_if_present(worktree_path, 0o700)
 
 
 def secure_worktree_git_metadata(workspace_root: Path, slot: int, user: str) -> None:
@@ -112,7 +112,7 @@ def _grant_shared_git_read_access(git_root: Path, worktrees_root: Path) -> None:
     """Expose shared git metadata while keeping per-worktree gitdirs private."""
     if not git_root.exists():
         return
-    git_root.chmod(0o755)
+    _chmod_if_present(git_root, 0o755)
     for root, directories, files in os.walk(git_root):
         root_path = Path(root)
         if root_path == worktrees_root or worktrees_root in root_path.parents:
@@ -120,21 +120,29 @@ def _grant_shared_git_read_access(git_root: Path, worktrees_root: Path) -> None:
             continue
         directories[:] = [name for name in directories if root_path / name != worktrees_root]
         if root_path != git_root:
-            root_path.chmod(0o755)
+            _chmod_if_present(root_path, 0o755)
         for filename in files:
-            (root_path / filename).chmod(0o644)
+            _chmod_if_present(root_path / filename, 0o644)
 
 
 def _set_tree_mode(path: Path, *, directory_mode: int, file_mode: int) -> None:
     """Apply modes recursively to a tree."""
     if not path.exists():
         return
-    path.chmod(directory_mode)
+    _chmod_if_present(path, directory_mode)
     for root, directories, files in os.walk(path):
         root_path = Path(root)
         if root_path != path:
-            root_path.chmod(directory_mode)
+            _chmod_if_present(root_path, directory_mode)
         for directory in directories:
-            (root_path / directory).chmod(directory_mode)
+            _chmod_if_present(root_path / directory, directory_mode)
         for filename in files:
-            (root_path / filename).chmod(file_mode)
+            _chmod_if_present(root_path / filename, file_mode)
+
+
+def _chmod_if_present(path: Path, mode: int) -> None:
+    """Apply chmod unless the path disappeared during a concurrent git update."""
+    try:
+        path.chmod(mode)
+    except FileNotFoundError:
+        return

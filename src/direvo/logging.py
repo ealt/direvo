@@ -83,7 +83,7 @@ class ProgressFormatter(logging.Formatter):
             return f"{prefix} Trial #{trial_id} complete - {detail} [slot {slot}]"
 
         if event == "trial_failed":
-            error = str(fields.get("error", "trial execution failed"))
+            error = _summarize_error(fields.get("error"))
             return f"{prefix} Trial #{trial_id} failed - {error} [slot {slot}]"
 
         return ""
@@ -95,6 +95,7 @@ def configure_logging(
     session_id: str | None = None,
     progress: bool = False,
     progress_start_time: float | None = None,
+    console_json: bool = False,
 ) -> logging.Logger:
     """Create the project logger.
 
@@ -103,6 +104,7 @@ def configure_logging(
         session_id: Optional session identifier to include in emitted events.
         progress: Whether to add a human-readable stdout progress handler.
         progress_start_time: Monotonic session start time for elapsed progress output.
+        console_json: Whether to also emit structured JSON to the console.
 
     Returns:
         Configured project logger.
@@ -116,9 +118,10 @@ def configure_logging(
 
     formatter = JsonFormatter()
 
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
+    if console_json:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
 
     if progress:
         progress_handler = logging.StreamHandler(sys.stdout)
@@ -174,3 +177,28 @@ def _format_metrics(metrics: object) -> str:
             rendered = str(value)
         parts.append(f"{key}={rendered}")
     return " ".join(parts)
+
+
+def _summarize_error(error: object) -> str:
+    """Render a compact single-line failure summary for progress output."""
+    if not isinstance(error, str):
+        return "trial execution failed"
+    lines = [line.strip() for line in error.splitlines() if line.strip()]
+    if not lines:
+        return "trial execution failed"
+    summary = lines[-1]
+    for prefix in ("implementation_failed: ", "nonzero_exit: "):
+        if summary.startswith(prefix):
+            return summary[len(prefix) :]
+    if len(lines) == 1:
+        return summary
+    for line in reversed(lines[:-1]):
+        candidate = line
+        for prefix in ("implementation_failed: ", "nonzero_exit: "):
+            if candidate.startswith(prefix):
+                candidate = candidate[len(prefix) :]
+                break
+        if candidate.lower().startswith("warning:"):
+            continue
+        return candidate
+    return summary

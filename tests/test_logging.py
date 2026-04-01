@@ -72,6 +72,21 @@ def test_progress_formatter_formats_started_completed_and_failed_events() -> Non
     assert failed == "[00:32] Trial #2 failed - timeout [slot 1]"
 
 
+def test_progress_formatter_compacts_multiline_failures() -> None:
+    formatter = ProgressFormatter(100.0, clock=lambda: 132.0)
+
+    failed = formatter.format(
+        _record(
+            "trial_failed",
+            trial_id=2,
+            slot=1,
+            error="nonzero_exit: WARNING: helper issue\nError: Permission denied (os error 13)",
+        )
+    )
+
+    assert failed == "[00:32] Trial #2 failed - Error: Permission denied (os error 13) [slot 1]"
+
+
 def test_progress_formatter_uses_status_for_non_successful_completion() -> None:
     formatter = ProgressFormatter(0.0, clock=lambda: 132.0)
 
@@ -86,6 +101,19 @@ def test_configure_logging_progress_handler_filters_non_milestone_events(
     monkeypatch.setattr("direvo.logging.time.monotonic", lambda: 100.0)
     log_path = tmp_path / "session.log"
     logger = configure_logging(log_path, progress=True, progress_start_time=0.0)
+
+    log_event(logger, "session_started", workspace_root="/tmp/workspace")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_configure_logging_can_emit_json_to_console_when_requested(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    log_path = tmp_path / "session.log"
+    logger = configure_logging(log_path, console_json=True)
 
     log_event(logger, "session_started", workspace_root="/tmp/workspace")
 

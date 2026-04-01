@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from direvo.worktree import secure_worktree_git_metadata, secure_worktree_root
@@ -57,3 +59,31 @@ def test_secure_worktree_git_metadata_exposes_shared_git_and_secures_slot_gitdir
     assert slot_gitdir.stat().st_mode & 0o777 == 0o700
     assert (slot_gitdir / "HEAD").stat().st_mode & 0o777 == 0o600
     assert (other_gitdir / "HEAD").stat().st_mode & 0o777 != 0o600
+
+
+def test_secure_worktree_git_metadata_ignores_vanishing_lockfiles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    git_root = workspace_root / ".git"
+    refs_root = git_root / "refs" / "heads" / "trial"
+    lock_path = refs_root / "1-smoke.lock"
+    slot_gitdir = git_root / "worktrees" / "wt-0"
+    refs_root.mkdir(parents=True)
+    slot_gitdir.mkdir(parents=True)
+    lock_path.write_text("", encoding="utf-8")
+
+    original_chmod = Path.chmod
+
+    def flaky_chmod(self: Path, mode: int) -> None:
+        if self == lock_path:
+            lock_path.unlink(missing_ok=True)
+            raise FileNotFoundError(self)
+        original_chmod(self, mode)
+
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr("pwd.getpwnam", lambda user: object())
+    monkeypatch.setattr("shutil.chown", lambda path, user=None: None)
+    monkeypatch.setattr(Path, "chmod", flaky_chmod)
+
+    secure_worktree_git_metadata(workspace_root, 0, "trial-0")
