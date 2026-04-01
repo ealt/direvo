@@ -1,10 +1,11 @@
 import subprocess
 import textwrap
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from eden.cli import doctor
+from eden.cli import doctor, main
 
 
 def _run(command: list[str], cwd: Path) -> None:
@@ -75,3 +76,37 @@ def test_doctor_rejects_non_executable_eval_script(
 
     with pytest.raises(RuntimeError, match="Missing required executables"):
         doctor(config_path)
+
+
+def test_main_run_prints_summary(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    bootstrap_result = SimpleNamespace(config=object(), database_manager=object(), logger=object())
+
+    class FakeOrchestrator:
+        def __init__(self, config: object, database_manager: object, logger: object) -> None:
+            self.config = config
+            self.database_manager = database_manager
+            self.logger = logger
+            self.ran = False
+
+        def run(self) -> int:
+            self.ran = True
+            return 1
+
+    orchestrators: list[FakeOrchestrator] = []
+
+    def fake_bootstrap(_config_path: Path) -> SimpleNamespace:
+        return bootstrap_result
+
+    def fake_orchestrator(config: object, database_manager: object, logger: object) -> FakeOrchestrator:
+        instance = FakeOrchestrator(config, database_manager, logger)
+        orchestrators.append(instance)
+        return instance
+
+    monkeypatch.setattr("eden.cli.bootstrap", fake_bootstrap)
+    monkeypatch.setattr("eden.cli.Orchestrator", fake_orchestrator)
+    monkeypatch.setattr("eden.cli.print_summary", lambda _orchestrator: print("summary"))
+
+    assert main(["run", "--config", "config.yaml"]) == 0
+    assert orchestrators
+    assert orchestrators[0].ran
+    assert capsys.readouterr().out == "summary\n"

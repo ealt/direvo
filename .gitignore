@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 *.pyc
 *.egg-info/
+docs/plans/review/
+eden-output-*/

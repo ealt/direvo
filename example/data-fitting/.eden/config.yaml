@@ -1,0 +1,19 @@
+planner_root: "./planner"
+workspace: "./workspace"
+parallel_trials: 3
+evaluate_command: "python3 eval.py"
+implement_command: "codex exec --full-auto --ephemeral 'Implement the plan in .eden/trial/plan.md'"
+plan_command: "python3 plan.py"
+max_trials: 15
+max_wall_time: "30m"
+implement_timeout_sec: 600
+evaluation_timeout_sec: 60
+metrics_schema:
+  r_squared: real
+  rmse: real
+objective:
+  expr: "r_squared"
+  direction: "maximize"
+file_permissions:
+  - path: "train.npz"
+    grant: "implementer"

@@ -57,14 +57,14 @@ def test_subprocess_planner_session_receives_notifications(tmp_path: Path) -> No
 
 def test_subprocess_planner_session_fails_when_process_exits_immediately(tmp_path: Path) -> None:
     session = SubprocessPlannerSession(
-        command="python3 -c 'import sys; sys.exit(1)'",
+        command="python3 -c 'import sys; print(\"boom\", file=sys.stderr); sys.exit(1)'",
         planner_root=tmp_path,
         notify_template="Trial completed. ID: {trial_id}",
         startup_timeout_sec=1,
         user=None,
     )
 
-    with pytest.raises(PlannerError, match="exited during startup"):
+    with pytest.raises(PlannerError, match="exited during startup: .*boom"):
         session.start()
 
 
@@ -85,6 +85,26 @@ def test_subprocess_planner_session_runs_as_planner_user_when_root(
     assert command[:4] == ["su", "planner", "-s", "/bin/sh"]
     assert "cd" in command[-1]
     assert "python3 planner.py --watch" in command[-1]
+
+
+def test_subprocess_planner_session_sets_auth_and_xdg_environment_when_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr("pwd.getpwnam", lambda user: object())
+    monkeypatch.setenv("EDEN_AUTH_HOME", "/root")
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", "/tmp/eden-runtime")
+    session = SubprocessPlannerSession(
+        command="python3 planner.py --watch",
+        planner_root=tmp_path,
+        notify_template="Trial completed. ID: {trial_id}",
+        startup_timeout_sec=1,
+    )
+
+    command = session._planner_command()
+
+    assert "HOME=/root" in command[-1]
+    assert "XDG_STATE_HOME=/tmp/eden-runtime/planner/state" in command[-1]
 
 
 def test_subprocess_planner_session_runs_directly_when_not_root(

@@ -2,7 +2,16 @@ import json
 import logging
 from pathlib import Path
 
-from eden.logging import configure_logging, log_event
+import pytest
+
+from eden.logging import ProgressFormatter, configure_logging, log_event
+
+
+def _record(event: str, **fields: object) -> logging.LogRecord:
+    record = logging.LogRecord("eden", logging.INFO, __file__, 1, event, (), None)
+    record.event = event
+    record.fields = fields
+    return record
 
 
 def test_log_event_includes_session_id(tmp_path: Path) -> None:
@@ -41,3 +50,73 @@ def test_configure_logging_closes_replaced_file_handlers(tmp_path: Path) -> None
 
     assert len(old_file_handlers) == 1
     assert old_file_handlers[0].stream is None
+
+
+def test_progress_formatter_formats_started_completed_and_failed_events() -> None:
+    formatter = ProgressFormatter(100.0, clock=lambda: 132.0)
+
+    started = formatter.format(_record("trial_started", trial_id=1, slot=0, branch="trial/1-linear-regression"))
+    completed = formatter.format(
+        _record(
+            "trial_complete",
+            trial_id=1,
+            slot=0,
+            status="success",
+            metrics={"r_squared": 0.421, "rmse": 0.3812},
+        )
+    )
+    failed = formatter.format(_record("trial_failed", trial_id=2, slot=1, error="timeout"))
+
+    assert started == "[00:32] Trial #1 started (linear-regression) [slot 0]"
+    assert completed == "[00:32] Trial #1 complete - r_squared=0.4210 rmse=0.3812 [slot 0]"
+    assert failed == "[00:32] Trial #2 failed - timeout [slot 1]"
+
+
+def test_progress_formatter_compacts_multiline_failures() -> None:
+    formatter = ProgressFormatter(100.0, clock=lambda: 132.0)
+
+    failed = formatter.format(
+        _record(
+            "trial_failed",
+            trial_id=2,
+            slot=1,
+            error="nonzero_exit: WARNING: helper issue\nError: Permission denied (os error 13)",
+        )
+    )
+
+    assert failed == "[00:32] Trial #2 failed - Error: Permission denied (os error 13) [slot 1]"
+
+
+def test_progress_formatter_uses_status_for_non_successful_completion() -> None:
+    formatter = ProgressFormatter(0.0, clock=lambda: 132.0)
+
+    rendered = formatter.format(_record("trial_complete", trial_id=3, slot=2, status="eval_error", metrics={}))
+
+    assert rendered == "[02:12] Trial #3 complete - eval_error [slot 2]"
+
+
+def test_configure_logging_progress_handler_filters_non_milestone_events(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("eden.logging.time.monotonic", lambda: 100.0)
+    log_path = tmp_path / "session.log"
+    logger = configure_logging(log_path, progress=True, progress_start_time=0.0)
+
+    log_event(logger, "session_started", workspace_root="/tmp/workspace")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_configure_logging_can_emit_json_to_console_when_requested(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    log_path = tmp_path / "session.log"
+    logger = configure_logging(log_path, console_json=True)
+
+    log_event(logger, "session_started", workspace_root="/tmp/workspace")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert '"event": "session_started"' in captured.err

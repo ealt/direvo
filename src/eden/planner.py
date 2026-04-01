@@ -68,14 +68,19 @@ class SubprocessPlannerSession(PlannerSession):
             cwd=self.planner_root,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
         )
         deadline = time.monotonic() + min(self.startup_timeout_sec, self._STARTUP_STABILITY_SEC)
         while True:
             if self._process.poll() is not None:
+                details = ""
+                if self._process.stderr is not None:
+                    stderr = self._process.stderr.read().strip()
+                    if stderr:
+                        details = f": {stderr}"
                 self._process = None
-                raise PlannerError(f"Planner process exited during startup: {self.command}")
+                raise PlannerError(f"Planner process exited during startup: {self.command}{details}")
             if time.monotonic() >= deadline:
                 return
             time.sleep(0.05)
@@ -119,7 +124,8 @@ class SubprocessPlannerSession(PlannerSession):
         """Render the planner subprocess command."""
         command = shlex.split(self.command)
         if self.user and os.geteuid() == 0 and _user_exists(self.user):
-            shell_command = f"cd {shlex.quote(str(self.planner_root))} && {shlex.join(command)}"
+            env_prefix = _shell_env_prefix(self.user)
+            shell_command = f"cd {shlex.quote(str(self.planner_root))} && {env_prefix}{shlex.join(command)}"
             return ["su", self.user, "-s", "/bin/sh", "-c", shell_command]
         return command
 
@@ -131,6 +137,27 @@ def _user_exists(user: str) -> bool:
     except KeyError:
         return False
     return True
+
+
+def _shell_env_prefix(user: str) -> str:
+    """Render shell environment assignments for a target user command."""
+    assignments: list[str] = []
+    auth_home = os.environ.get("EDEN_AUTH_HOME")
+    runtime_root = os.environ.get("EDEN_RUNTIME_DIR")
+    if auth_home:
+        assignments.append(f"HOME={shlex.quote(auth_home)}")
+    if runtime_root:
+        user_root = Path(runtime_root) / user
+        assignments.extend(
+            [
+                f"XDG_STATE_HOME={shlex.quote(str(user_root / 'state'))}",
+                f"XDG_CACHE_HOME={shlex.quote(str(user_root / 'cache'))}",
+                f"XDG_DATA_HOME={shlex.quote(str(user_root / 'share'))}",
+            ]
+        )
+    if not assignments:
+        return ""
+    return f"env {' '.join(assignments)} "
 
 
 def create_planner_session(

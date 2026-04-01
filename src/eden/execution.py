@@ -185,7 +185,7 @@ class ImplementationManager:
     ) -> subprocess.CompletedProcess[str]:
         """Run a command, optionally as another user."""
         if user and os.geteuid() == 0 and _user_exists(user):
-            shell_command = f"cd {shlex.quote(str(cwd))} && {shlex.join(command)}"
+            shell_command = f"cd {shlex.quote(str(cwd))} && {_shell_env_prefix(user)}{shlex.join(command)}"
             return self.runner.run(
                 ["su", user, "-s", "/bin/sh", "-c", shell_command],
                 cwd=cwd,
@@ -210,3 +210,43 @@ def _user_exists(user: str) -> bool:
     except KeyError:
         return False
     return True
+
+
+def _shell_env_prefix(user: str) -> str:
+    """Render shell environment assignments for a target user command."""
+    assignments: list[str] = []
+    auth_home = os.environ.get("EDEN_AUTH_HOME")
+    runtime_root = os.environ.get("EDEN_RUNTIME_DIR")
+    if runtime_root and user.startswith("trial-"):
+        user_home = Path(runtime_root) / user / "home"
+        user_root = Path(runtime_root) / user
+        assignments.extend(
+            [
+                f"HOME={shlex.quote(str(user_home))}",
+                f"CODEX_HOME={shlex.quote(str(user_home / '.codex'))}",
+                f"TMPDIR={shlex.quote(str(user_root / 'tmp'))}",
+                f"PATH={shlex.quote(_clean_agent_path(os.environ.get('PATH', '')))}",
+            ]
+        )
+    elif auth_home:
+        assignments.append(f"HOME={shlex.quote(auth_home)}")
+    if runtime_root:
+        user_root = Path(runtime_root) / user
+        assignments.extend(
+            [
+                f"XDG_STATE_HOME={shlex.quote(str(user_root / 'state'))}",
+                f"XDG_CACHE_HOME={shlex.quote(str(user_root / 'cache'))}",
+                f"XDG_DATA_HOME={shlex.quote(str(user_root / 'share'))}",
+            ]
+        )
+    if not assignments:
+        return ""
+    return f"env {' '.join(assignments)} "
+
+
+def _clean_agent_path(path_value: str) -> str:
+    """Remove stale Codex helper shims from PATH before launching a fresh session."""
+    parts = [part for part in path_value.split(":") if part and "/.codex/tmp/path/" not in part]
+    if not parts:
+        return "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    return ":".join(parts)

@@ -30,12 +30,14 @@ from .models import (
     ValidatedProposal,
 )
 from .planner import PlannerSession, create_planner_session
+from .runtime import RuntimeSetup
 from .termination import should_terminate
 from .worktree import (
     clean_trial_docs,
     copy_tree_contents,
     copy_trial_docs_to_artifacts,
     ensure_trial_directories,
+    secure_worktree_git_metadata,
     secure_worktree_root,
 )
 
@@ -62,7 +64,7 @@ def _ensure_symlink(source: Path, target: Path) -> None:
     target.symlink_to(source)
 
 
-def bootstrap(config_path: str | Path) -> BootstrapResult:
+def bootstrap(config_path: str | Path, *, progress: bool = True) -> BootstrapResult:
     """Bootstrap the workspace and initialize persistent session state."""
     config = load_config(config_path)
     git = GitManager(config.workspace_root)
@@ -90,9 +92,10 @@ def bootstrap(config_path: str | Path) -> BootstrapResult:
         busy_timeout_ms=config.sqlite_busy_timeout_ms,
     )
     database_manager.initialize()
+    RuntimeSetup().prepare(config)
 
     session_log_path = eden_dir / "session.log"
-    logger = configure_logging(session_log_path)
+    logger = configure_logging(session_log_path, progress=progress, progress_start_time=time.monotonic())
     log_event(
         logger,
         "session_started",
@@ -142,6 +145,7 @@ class Orchestrator:
         self.idle_poll_interval_sec = idle_poll_interval_sec
         self._stop_requested = threading.Event()
         self.last_termination_reason: str | None = None
+        self.wall_time_seconds = 0.0
 
     def request_stop(self) -> None:
         """Stop dispatching new work and let in-flight trials drain."""
@@ -191,6 +195,7 @@ class Orchestrator:
             for slot in range(self.config.parallel_trials):
                 worktree_path = self.git_manager.initialize_worktree(slot)
                 secure_worktree_root(worktree_path, f"trial-{slot}")
+                secure_worktree_git_metadata(self.config.workspace_root, slot, f"trial-{slot}")
 
             async def worker(slot: int) -> None:
                 nonlocal claimed_count, termination_reason
@@ -245,12 +250,14 @@ class Orchestrator:
             self.planner_session.stop()
             for slot in range(self.config.parallel_trials):
                 self.git_manager.remove_worktree(slot)
+            self.wall_time_seconds = time.monotonic() - session_started_at
             self.last_termination_reason = termination_reason or "shutdown"
             log_event(
                 self.logger,
                 "session_ended",
                 total_trials=claimed_count,
                 reason=self.last_termination_reason,
+                wall_time_seconds=self.wall_time_seconds,
             )
         return claimed_count
 
@@ -386,6 +393,8 @@ class Orchestrator:
                 slot=slot,
                 exit_code=implementation_result.returncode,
                 reason=implementation_result.reason,
+                stdout=implementation_result.stdout.strip(),
+                stderr=implementation_result.stderr.strip(),
             )
             if not implementation_result.success:
                 self._recover_trial(
@@ -394,7 +403,11 @@ class Orchestrator:
                     proposal=proposal,
                     branch_name=branch_name,
                     parent_commits=json.dumps(proposal.parent_commits),
-                    error_message=implementation_result.reason or "implementation_failed",
+                    error_message=self._command_failure_message(
+                        reason=implementation_result.reason or "implementation_failed",
+                        stdout=implementation_result.stdout,
+                        stderr=implementation_result.stderr,
+                    ),
                 )
                 return
 
@@ -417,6 +430,8 @@ class Orchestrator:
                 exit_code=evaluation_result.returncode,
                 metrics=evaluation_result.metrics,
                 reason=evaluation_result.reason,
+                stdout=evaluation_result.stdout.strip(),
+                stderr=evaluation_result.stderr.strip(),
             )
 
             copy_trial_docs_to_artifacts(paths.trial_docs_path, paths.artifacts_path)
@@ -443,6 +458,8 @@ class Orchestrator:
                 slot=slot,
                 commit_sha=commit_sha,
                 status=status.value,
+                branch=branch_name,
+                metrics=evaluation_result.metrics,
             )
             self._notify_planner_trial_completed(trial_id=trial_id, proposal_id=proposal.proposal_id)
         except Exception as exc:
@@ -469,6 +486,7 @@ class Orchestrator:
         trial_docs_path = clean_trial_docs(worktree_path)
         copy_tree_contents(proposal.artifacts_path, trial_docs_path)
         secure_worktree_root(worktree_path, f"trial-{slot}")
+        secure_worktree_git_metadata(self.config.workspace_root, slot, f"trial-{slot}")
 
         artifacts_path = self.config.artifacts_dir / f"trial-{trial_id}"
         return TrialPaths(
@@ -500,6 +518,7 @@ class Orchestrator:
         clean_trial_docs(worktree_path)
         self.git_manager.require_clean_status(worktree_path)
         secure_worktree_root(worktree_path, f"trial-{slot}")
+        secure_worktree_git_metadata(self.config.workspace_root, slot, f"trial-{slot}")
         self.database_manager.update_trial(
             TrialUpdate(
                 trial_id=trial_id,
@@ -520,8 +539,17 @@ class Orchestrator:
             trial_id=trial_id,
             slot=slot,
             proposal_id=proposal.proposal_id,
+            branch=branch_name,
             error=error_message or "trial execution failed",
         )
+
+    @staticmethod
+    def _command_failure_message(*, reason: str, stdout: str, stderr: str) -> str:
+        """Summarize a subprocess failure for logs and persisted trial rows."""
+        details = stderr.strip() or stdout.strip()
+        if not details:
+            return reason
+        return f"{reason}: {details}"
 
     def _notify_planner_trial_completed(self, *, trial_id: int, proposal_id: int) -> None:
         """Notify the planner about a completed trial without affecting trial results."""

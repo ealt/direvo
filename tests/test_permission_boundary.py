@@ -9,7 +9,7 @@ from eden.config import load_config
 from eden.db import DatabaseManager
 from eden.git_manager import GitManager
 from eden.runtime import RuntimeSetup
-from eden.worktree import secure_worktree_root
+from eden.worktree import secure_worktree_git_metadata, secure_worktree_root
 
 if os.geteuid() != 0 or os.environ.get("EDEN_RUN_PRIVILEGED_TESTS") != "1":
     pytestmark = pytest.mark.skip(
@@ -82,6 +82,8 @@ def test_runtime_enforces_permission_boundaries(tmp_path: Path) -> None:
     worktree_one = git.initialize_worktree(1)
     secure_worktree_root(worktree_zero, "trial-0")
     secure_worktree_root(worktree_one, "trial-1")
+    secure_worktree_git_metadata(config.workspace_root, 0, "trial-0")
+    secure_worktree_git_metadata(config.workspace_root, 1, "trial-1")
     RuntimeSetup().prepare(config)
 
     assert (worktree_zero.stat().st_mode & 0o777) == 0o700
@@ -94,7 +96,9 @@ def test_runtime_enforces_permission_boundaries(tmp_path: Path) -> None:
     assert _su_status("planner", f"test -w {config.proposals_db}") == 0
 
     assert _su_status("trial-0", f"test -r {worktree_zero / 'tracked.txt'}") == 0
-    assert _su_status("trial-0", f"test -r {config.workspace_root / '.git' / 'HEAD'}") != 0
+    assert _su_status("trial-0", f"test -r {config.workspace_root / '.git' / 'HEAD'}") == 0
+    assert _su_status("trial-0", f"test -r {config.workspace_root / '.git' / 'worktrees' / 'wt-0' / 'HEAD'}") == 0
+    assert _su_status("trial-0", f"test -r {config.workspace_root / '.git' / 'worktrees' / 'wt-1' / 'HEAD'}") != 0
     assert _su_status("trial-0", f"test -r {config.results_db}") != 0
     assert _su_status("trial-0", f"ls {worktree_one}") != 0
     assert _su_status("trial-0", f"ls {config.planner_root}") != 0

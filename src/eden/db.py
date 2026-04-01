@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
-from .models import ProposalClaim, ProposalStatus, TrialStatus, TrialUpdate
+from .models import ObjectiveDirection, ProposalClaim, ProposalStatus, TrialStatus, TrialUpdate
 
 
 class DatabaseError(RuntimeError):
@@ -125,6 +125,20 @@ class DatabaseManager:
         """Return all trials ordered by id."""
         with self._connection(self.results_db, self.results_journal_mode) as conn:
             return list(conn.execute("SELECT * FROM trials ORDER BY trial_id ASC"))
+
+    def best_trial(self, expression: str, direction: ObjectiveDirection) -> sqlite3.Row | None:
+        """Return the best successful trial for an objective expression."""
+        order = "DESC" if direction == ObjectiveDirection.MAXIMIZE else "ASC"
+        query = f"""
+            SELECT *
+            FROM trials
+            WHERE status = ?
+              AND ({expression}) IS NOT NULL
+            ORDER BY ({expression}) {order}, trial_id ASC
+            LIMIT 1
+        """
+        with self._connection(self.results_db, self.results_journal_mode) as conn:
+            return conn.execute(query, (TrialStatus.SUCCESS.value,)).fetchone()
 
     def update_proposal_status(
         self, proposal_id: int, status: ProposalStatus, *, priority: float | None = None

@@ -1,8 +1,11 @@
+import json
 import subprocess
 import textwrap
 import threading
 import time
 from pathlib import Path
+
+import pytest
 
 from eden.config import load_config
 from eden.db import DatabaseManager
@@ -10,7 +13,7 @@ from eden.execution import EvaluationResult, ImplementationManager, Implementati
 from eden.git_manager import GitManager
 from eden.logging import configure_logging
 from eden.models import ProposalStatus
-from eden.orchestrator import Orchestrator
+from eden.orchestrator import Orchestrator, bootstrap
 from eden.planner import PlannerSession
 
 
@@ -291,6 +294,130 @@ def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
     assert proposal_row["status"] == "completed"
     assert (experiment_root / ".eden" / "artifacts" / "trial-1" / "plan.md").exists()
     assert not (config.workspace_root / "worktrees" / "wt-0").exists()
+    assert orchestrator.wall_time_seconds >= 0
+
+    log_entries = [
+        json.loads(line)
+        for line in (experiment_root / ".eden" / "session.log").read_text(encoding="utf-8").splitlines()
+    ]
+    trial_complete = next(entry for entry in log_entries if entry["event"] == "trial_complete")
+    assert trial_complete["branch"] == "trial/1-smoke"
+    assert trial_complete["metrics"] == {"test_pass_rate": 1.0}
+
+
+def test_bootstrap_reapplies_runtime_setup_after_database_initialization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    experiment_root, _workspace = _init_experiment(tmp_path)
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 1
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
+    )
+
+    prepare_calls: list[Path] = []
+
+    class FakeRuntimeSetup:
+        def prepare(self, config: object) -> None:
+            prepare_calls.append(config.proposals_db)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr("eden.orchestrator.RuntimeSetup", FakeRuntimeSetup)
+
+    result = bootstrap(config_path, progress=False)
+
+    assert result.config.proposals_db.exists()
+    assert prepare_calls == [result.config.proposals_db]
+
+
+def test_orchestrator_records_subprocess_failure_details(tmp_path: Path) -> None:
+    experiment_root, workspace = _init_experiment(tmp_path)
+    head_sha = _head_sha(workspace)
+
+    config_path = _write_config(
+        experiment_root,
+        """
+        parallel_trials: 1
+        evaluate_command: "./evaluate.sh"
+        implement_command: "echo noop"
+        max_trials: 1
+        max_wall_time: "1h"
+        objective:
+          expr: "test_pass_rate"
+          direction: "maximize"
+        metrics_schema:
+          test_pass_rate: real
+        """,
+    )
+    config = load_config(config_path)
+    proposal_dir = config.proposals_dir / "proposal-1"
+    proposal_dir.mkdir(parents=True)
+    (proposal_dir / "plan.md").write_text("Implement the change.\n", encoding="utf-8")
+    database_manager = DatabaseManager(
+        results_db=config.results_db,
+        proposals_db=config.proposals_db,
+        metrics_schema=config.metrics_schema,
+        busy_timeout_ms=config.sqlite_busy_timeout_ms,
+    )
+    database_manager.initialize()
+    database_manager.create_proposal(
+        priority=1.0,
+        slug="fail-detail",
+        parent_commits=[head_sha],
+        artifacts_uri=str(proposal_dir),
+        status=ProposalStatus.READY,
+    )
+
+    class FailingImplementationManager(FakeImplementationManager):
+        def run_implementation(
+            self,
+            *,
+            worktree_path: Path,
+            slot: int,
+            timeout_sec: int,
+            user: str | None = None,
+            slug: str = "",
+            trial_id: int = 0,
+        ) -> ImplementationResult:
+            return ImplementationResult(
+                success=False,
+                stdout="usage: codex exec [OPTIONS]",
+                stderr="error: unexpected argument '--approval-mode'",
+                returncode=2,
+            )
+
+    planner = FakePlannerSession()
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
+    orchestrator = Orchestrator(
+        config,
+        database_manager,
+        logger,
+        git_manager=GitManager(config.workspace_root),
+        execution_manager=FailingImplementationManager(),
+        planner_session=planner,
+    )
+
+    orchestrator.run()
+
+    log_entries = [
+        json.loads(line)
+        for line in (experiment_root / ".eden" / "session.log").read_text(encoding="utf-8").splitlines()
+    ]
+    implementation_complete = next(entry for entry in log_entries if entry["event"] == "implementation_complete")
+    trial_failed = next(entry for entry in log_entries if entry["event"] == "trial_failed")
+
+    assert implementation_complete["stderr"] == "error: unexpected argument '--approval-mode'"
+    assert implementation_complete["stdout"] == "usage: codex exec [OPTIONS]"
+    assert trial_failed["error"] == "implementation_failed: error: unexpected argument '--approval-mode'"
 
 
 def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> None:
@@ -356,6 +483,13 @@ def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> 
     assert proposal_row["priority"] == 0.9
     assert planner.completed == []
     assert not (config.workspace_root / "worktrees" / "wt-0").exists()
+
+    log_entries = [
+        json.loads(line)
+        for line in (experiment_root / ".eden" / "session.log").read_text(encoding="utf-8").splitlines()
+    ]
+    trial_failed = next(entry for entry in log_entries if entry["event"] == "trial_failed")
+    assert trial_failed["branch"] == "trial/1-fail"
 
 
 def test_orchestrator_records_eval_error_but_keeps_commit(tmp_path: Path) -> None:
