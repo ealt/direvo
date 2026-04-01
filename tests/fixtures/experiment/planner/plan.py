@@ -26,8 +26,10 @@ def _log(**fields: object) -> None:
     """Append a JSON log line to plan.log if DIREVO_LOG_DIR is set."""
     if _LOG_DIR is None:
         return
-    with open(os.path.join(_LOG_DIR, "plan.log"), "a") as f:
+    with open(os.path.join(_LOG_DIR, "plan.log"), "a", encoding="utf-8") as f:
         f.write(json.dumps(fields, sort_keys=True) + "\n")
+
+
 def get_head_sha(workspace: str) -> str:
     """Return the current HEAD commit SHA of the workspace repo."""
     result = subprocess.run(

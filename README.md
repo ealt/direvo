@@ -4,10 +4,11 @@ An orchestration system that runs concurrent research trials inside Docker conta
 
 ## Quick Start
 
-1. Install dependencies:
+1. Install the package and dev dependencies:
    ```bash
-   uv sync --dev
+   uv sync --extra dev
    ```
+   This installs the `direvo` CLI into the virtualenv.
 
 2. Run the test suite:
    ```bash
@@ -18,6 +19,9 @@ An orchestration system that runs concurrent research trials inside Docker conta
    ```bash
    uv run direvo doctor --config /path/to/.direvo/config.yaml
    ```
+
+4. Try the [data-fitting demo](example/data-fitting/) for a realistic example
+   using Claude and Codex as AI agents.
 
 ## How It Works
 
