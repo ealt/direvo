@@ -14,6 +14,7 @@ from pathlib import Path
 from .config import ConfigError, load_config
 from .git_manager import GitManager
 from .orchestrator import Orchestrator, bootstrap
+from .summary import print_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
             result = bootstrap(Path(args.config))
             orchestrator = Orchestrator(result.config, result.database_manager, result.logger)
             orchestrator.run()
+            print_summary(orchestrator)
             return 0
     except (ConfigError, RuntimeError, sqlite3.Error) as exc:
         print(f"error: {exc}", file=sys.stderr)

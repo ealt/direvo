@@ -13,6 +13,12 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 IMAGE_NAME="direvo-data-fitting-demo"
+OUTPUT_DIR="${DIREVO_OUTPUT_DIR:-./direvo-output-$(date +%Y%m%d-%H%M%S)}"
+
+case "$OUTPUT_DIR" in
+    /*) OUTPUT_HOST_DIR="$OUTPUT_DIR" ;;
+    *) OUTPUT_HOST_DIR="$(pwd)/$OUTPUT_DIR" ;;
+esac
 
 # --- Prerequisites ---
 
@@ -65,6 +71,14 @@ echo "  Parallel:    3 trials"
 echo "  Max trials:  15"
 echo ""
 
+mkdir -p "$OUTPUT_HOST_DIR"
+
+rc=0
 docker run --rm --privileged \
+    -v "$OUTPUT_HOST_DIR:/output" \
     "${AUTH_MOUNTS[@]}" \
-    "$IMAGE_NAME"
+    "$IMAGE_NAME" || rc=$?
+
+echo ""
+echo "Results: $OUTPUT_HOST_DIR/"
+exit "$rc"

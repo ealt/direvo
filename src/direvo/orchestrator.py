@@ -62,7 +62,7 @@ def _ensure_symlink(source: Path, target: Path) -> None:
     target.symlink_to(source)
 
 
-def bootstrap(config_path: str | Path) -> BootstrapResult:
+def bootstrap(config_path: str | Path, *, progress: bool = True) -> BootstrapResult:
     """Bootstrap the workspace and initialize persistent session state."""
     config = load_config(config_path)
     git = GitManager(config.workspace_root)
@@ -92,7 +92,7 @@ def bootstrap(config_path: str | Path) -> BootstrapResult:
     database_manager.initialize()
 
     session_log_path = direvo_dir / "session.log"
-    logger = configure_logging(session_log_path)
+    logger = configure_logging(session_log_path, progress=progress, progress_start_time=time.monotonic())
     log_event(
         logger,
         "session_started",
@@ -142,6 +142,7 @@ class Orchestrator:
         self.idle_poll_interval_sec = idle_poll_interval_sec
         self._stop_requested = threading.Event()
         self.last_termination_reason: str | None = None
+        self.wall_time_seconds = 0.0
 
     def request_stop(self) -> None:
         """Stop dispatching new work and let in-flight trials drain."""
@@ -245,12 +246,14 @@ class Orchestrator:
             self.planner_session.stop()
             for slot in range(self.config.parallel_trials):
                 self.git_manager.remove_worktree(slot)
+            self.wall_time_seconds = time.monotonic() - session_started_at
             self.last_termination_reason = termination_reason or "shutdown"
             log_event(
                 self.logger,
                 "session_ended",
                 total_trials=claimed_count,
                 reason=self.last_termination_reason,
+                wall_time_seconds=self.wall_time_seconds,
             )
         return claimed_count
 
@@ -443,6 +446,8 @@ class Orchestrator:
                 slot=slot,
                 commit_sha=commit_sha,
                 status=status.value,
+                branch=branch_name,
+                metrics=evaluation_result.metrics,
             )
             self._notify_planner_trial_completed(trial_id=trial_id, proposal_id=proposal.proposal_id)
         except Exception as exc:
@@ -520,6 +525,7 @@ class Orchestrator:
             trial_id=trial_id,
             slot=slot,
             proposal_id=proposal.proposal_id,
+            branch=branch_name,
             error=error_message or "trial execution failed",
         )
 

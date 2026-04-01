@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from direvo.db import DatabaseManager
-from direvo.models import ProposalStatus, TrialStatus, TrialUpdate
+from direvo.models import ObjectiveDirection, ProposalStatus, TrialStatus, TrialUpdate
 
 
 def _manager(root: Path) -> DatabaseManager:
@@ -137,3 +137,45 @@ def test_database_manager_uses_split_journal_modes(tmp_path: Path) -> None:
 
     assert results_mode == "delete"
     assert proposals_mode == "wal"
+
+
+def test_best_trial_returns_maximize_winner(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    first = manager.reserve_trial_id()
+    second = manager.reserve_trial_id()
+    manager.update_trial(
+        TrialUpdate(trial_id=first, status=TrialStatus.SUCCESS, metrics={"test_pass_rate": 0.7, "latency_ms": 10.0})
+    )
+    manager.update_trial(
+        TrialUpdate(trial_id=second, status=TrialStatus.SUCCESS, metrics={"test_pass_rate": 0.9, "latency_ms": 20.0})
+    )
+
+    best = manager.best_trial("test_pass_rate", ObjectiveDirection.MAXIMIZE)
+
+    assert best is not None
+    assert best["trial_id"] == second
+
+
+def test_best_trial_returns_minimize_winner(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    first = manager.reserve_trial_id()
+    second = manager.reserve_trial_id()
+    manager.update_trial(
+        TrialUpdate(trial_id=first, status=TrialStatus.SUCCESS, metrics={"test_pass_rate": 0.7, "latency_ms": 10.0})
+    )
+    manager.update_trial(
+        TrialUpdate(trial_id=second, status=TrialStatus.SUCCESS, metrics={"test_pass_rate": 0.9, "latency_ms": 5.0})
+    )
+
+    best = manager.best_trial("latency_ms", ObjectiveDirection.MINIMIZE)
+
+    assert best is not None
+    assert best["trial_id"] == second
+
+
+def test_best_trial_returns_none_without_successful_trials(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    trial_id = manager.reserve_trial_id()
+    manager.update_trial(TrialUpdate(trial_id=trial_id, status=TrialStatus.ERROR))
+
+    assert manager.best_trial("test_pass_rate", ObjectiveDirection.MAXIMIZE) is None

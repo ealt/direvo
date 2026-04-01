@@ -1,3 +1,4 @@
+import json
 import subprocess
 import textwrap
 import threading
@@ -291,6 +292,15 @@ def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
     assert proposal_row["status"] == "completed"
     assert (experiment_root / ".direvo" / "artifacts" / "trial-1" / "plan.md").exists()
     assert not (config.workspace_root / "worktrees" / "wt-0").exists()
+    assert orchestrator.wall_time_seconds >= 0
+
+    log_entries = [
+        json.loads(line)
+        for line in (experiment_root / ".direvo" / "session.log").read_text(encoding="utf-8").splitlines()
+    ]
+    trial_complete = next(entry for entry in log_entries if entry["event"] == "trial_complete")
+    assert trial_complete["branch"] == "trial/1-smoke"
+    assert trial_complete["metrics"] == {"test_pass_rate": 1.0}
 
 
 def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> None:
@@ -356,6 +366,13 @@ def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> 
     assert proposal_row["priority"] == 0.9
     assert planner.completed == []
     assert not (config.workspace_root / "worktrees" / "wt-0").exists()
+
+    log_entries = [
+        json.loads(line)
+        for line in (experiment_root / ".direvo" / "session.log").read_text(encoding="utf-8").splitlines()
+    ]
+    trial_failed = next(entry for entry in log_entries if entry["event"] == "trial_failed")
+    assert trial_failed["branch"] == "trial/1-fail"
 
 
 def test_orchestrator_records_eval_error_but_keeps_commit(tmp_path: Path) -> None:
