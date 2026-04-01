@@ -98,7 +98,7 @@ def test_progress_formatter_uses_status_for_non_successful_completion() -> None:
 def test_configure_logging_progress_handler_filters_non_milestone_events(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr("direvo.logging.time.monotonic", lambda: 100.0)
+    monkeypatch.setattr("eden.logging.time.monotonic", lambda: 100.0)
     log_path = tmp_path / "session.log"
     logger = configure_logging(log_path, progress=True, progress_start_time=0.0)
 

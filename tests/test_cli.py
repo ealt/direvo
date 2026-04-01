@@ -102,9 +102,9 @@ def test_main_run_prints_summary(monkeypatch: pytest.MonkeyPatch, capsys: pytest
         orchestrators.append(instance)
         return instance
 
-    monkeypatch.setattr("direvo.cli.bootstrap", fake_bootstrap)
-    monkeypatch.setattr("direvo.cli.Orchestrator", fake_orchestrator)
-    monkeypatch.setattr("direvo.cli.print_summary", lambda _orchestrator: print("summary"))
+    monkeypatch.setattr("eden.cli.bootstrap", fake_bootstrap)
+    monkeypatch.setattr("eden.cli.Orchestrator", fake_orchestrator)
+    monkeypatch.setattr("eden.cli.print_summary", lambda _orchestrator: print("summary"))
 
     assert main(["run", "--config", "config.yaml"]) == 0
     assert orchestrators

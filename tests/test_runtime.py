@@ -264,7 +264,7 @@ def test_runtime_setup_restores_existing_worktree_git_metadata(
     monkeypatch.setattr("os.geteuid", lambda: 0)
     monkeypatch.setattr("shutil.chown", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        "direvo.runtime.secure_worktree_git_metadata",
+        "eden.runtime.secure_worktree_git_metadata",
         lambda workspace_root, slot, user: restored.append((workspace_root, slot, user)),
     )
 

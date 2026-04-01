@@ -298,7 +298,7 @@ def test_orchestrator_runs_single_ready_proposal(tmp_path: Path) -> None:
 
     log_entries = [
         json.loads(line)
-        for line in (experiment_root / ".direvo" / "session.log").read_text(encoding="utf-8").splitlines()
+        for line in (experiment_root / ".eden" / "session.log").read_text(encoding="utf-8").splitlines()
     ]
     trial_complete = next(entry for entry in log_entries if entry["event"] == "trial_complete")
     assert trial_complete["branch"] == "trial/1-smoke"
@@ -331,7 +331,7 @@ def test_bootstrap_reapplies_runtime_setup_after_database_initialization(
         def prepare(self, config: object) -> None:
             prepare_calls.append(config.proposals_db)  # type: ignore[attr-defined]
 
-    monkeypatch.setattr("direvo.orchestrator.RuntimeSetup", FakeRuntimeSetup)
+    monkeypatch.setattr("eden.orchestrator.RuntimeSetup", FakeRuntimeSetup)
 
     result = bootstrap(config_path, progress=False)
 
@@ -396,7 +396,7 @@ def test_orchestrator_records_subprocess_failure_details(tmp_path: Path) -> None
             )
 
     planner = FakePlannerSession()
-    logger = configure_logging(experiment_root / ".direvo" / "session.log")
+    logger = configure_logging(experiment_root / ".eden" / "session.log")
     orchestrator = Orchestrator(
         config,
         database_manager,
@@ -410,7 +410,7 @@ def test_orchestrator_records_subprocess_failure_details(tmp_path: Path) -> None
 
     log_entries = [
         json.loads(line)
-        for line in (experiment_root / ".direvo" / "session.log").read_text(encoding="utf-8").splitlines()
+        for line in (experiment_root / ".eden" / "session.log").read_text(encoding="utf-8").splitlines()
     ]
     implementation_complete = next(entry for entry in log_entries if entry["event"] == "implementation_complete")
     trial_failed = next(entry for entry in log_entries if entry["event"] == "trial_failed")
@@ -486,7 +486,7 @@ def test_orchestrator_recovers_and_requeues_failed_execution(tmp_path: Path) -> 
 
     log_entries = [
         json.loads(line)
-        for line in (experiment_root / ".direvo" / "session.log").read_text(encoding="utf-8").splitlines()
+        for line in (experiment_root / ".eden" / "session.log").read_text(encoding="utf-8").splitlines()
     ]
     trial_failed = next(entry for entry in log_entries if entry["event"] == "trial_failed")
     assert trial_failed["branch"] == "trial/1-fail"
