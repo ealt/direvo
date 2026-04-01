@@ -9,20 +9,21 @@ Unix user isolation.
 
 ```bash
 # From the repo root:
-export ANTHROPIC_API_KEY=sk-...
-export OPENAI_API_KEY=sk-...
 ./example/data-fitting/run.sh
 ```
 
-That's it. The script builds a Docker image (installs direvo, initializes the
-workspace git repo, copies the experiment) and runs the experiment with
-`--privileged` for user isolation.
+That's it. The script builds a Docker image (installs direvo + both CLIs,
+initializes the workspace git repo, copies the experiment) and runs the
+experiment with `--privileged` for user isolation.
 
 ## Prerequisites
 
 - Docker
-- `ANTHROPIC_API_KEY` (for Claude CLI inside the container)
-- `OPENAI_API_KEY` (for Codex CLI inside the container)
+- Claude CLI logged in (`claude auth login`)
+- Codex CLI logged in (`codex auth login`)
+
+The run script mounts your local CLI auth directories into the container —
+no API keys needed.
 
 ## What Happens
 
@@ -58,6 +59,26 @@ workspace git repo, copies the experiment) and runs the experiment with
 - Inside Docker with `--privileged`, these boundaries are enforced by Unix
   users created by `runtime.py`.
 
+## Authentication
+
+The run script mounts your host CLI auth directories into the container,
+following the same auth-passthrough pattern used by
+[garth](../../docs/plans/v0.md). The `auth-setup.sh` entrypoint wrapper
+makes the mounted directories traversable by trial users so both Claude
+(planner) and Codex (implementer) can authenticate.
+
+Mounted paths (when they exist on the host):
+
+| Host path                     | Container path                       |
+|-------------------------------|--------------------------------------|
+| `~/.claude`                   | `/root/.claude`                      |
+| `~/.claude.json`              | `/root/.claude.json`                 |
+| `~/.config/claude`            | `/root/.config/claude`               |
+| `~/.local/state/claude`       | `/root/.local/state/claude`          |
+| `~/.local/share/claude`       | `/root/.local/share/claude`          |
+| `~/.cache/claude`             | `/root/.cache/claude`                |
+| `~/.codex`                    | `/root/.codex`                       |
+
 ## Directory Structure
 
 ```
@@ -66,6 +87,7 @@ eval.py                    Evaluator: scores on hidden test set, writes report
 generate_data.py           Regenerate train/test data (deterministic, seed=42)
 train.npz                  Training data (granted to implementer)
 test.npz                   Test data (hidden from planner and implementer)
+auth-setup.sh              Entrypoint wrapper: propagates host auth to trial users
 Dockerfile                 Demo container image
 run.sh                     Build + run script
 planner/                   Planner scope
