@@ -98,7 +98,7 @@ def test_runtime_setup_creates_users_and_applies_permissions(
     assert ["git", "config", "--system", "--add", "safe.directory", str(config.workspace_root)] in runner.commands
     assert config.experiment_root.stat().st_mode & 0o777 == 0o711
     assert (config.experiment_root / ".direvo").stat().st_mode & 0o777 == 0o711
-    assert config.planner_root.stat().st_mode & 0o777 == 0o750
+    assert config.planner_root.stat().st_mode & 0o777 == 0o751
     assert (config.planner_root / ".direvo").stat().st_mode & 0o777 == 0o750
     assert (config.workspace_root / "worktrees").stat().st_mode & 0o777 == 0o755
     assert git_dir.stat().st_mode & 0o777 == 0o750
@@ -251,3 +251,23 @@ def test_runtime_setup_skips_broken_codex_symlinks_from_auth_mount(
 
     assert (runtime_root / "trial-0" / "home" / ".codex" / "auth.json").exists()
     assert not (runtime_root / "trial-0" / "home" / ".codex" / "AGENTS.md").exists()
+
+
+def test_runtime_setup_restores_existing_worktree_git_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = load_config(_write_config(tmp_path))
+    existing_worktree = config.workspace_root / "worktrees" / "wt-1"
+    existing_worktree.mkdir(parents=True, exist_ok=True)
+
+    restored: list[tuple[Path, int, str]] = []
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr("shutil.chown", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "direvo.runtime.secure_worktree_git_metadata",
+        lambda workspace_root, slot, user: restored.append((workspace_root, slot, user)),
+    )
+
+    RuntimeSetup(FakeRunner()).prepare(config)
+
+    assert restored == [(config.workspace_root, 1, "trial-1")]

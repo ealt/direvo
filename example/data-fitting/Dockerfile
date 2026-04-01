@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       git passwd curl ca-certificates gnupg \
+       git passwd curl ca-certificates gnupg ripgrep bubblewrap patch \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 LTS (for Codex CLI)

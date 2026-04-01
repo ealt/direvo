@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .config import load_config
 from .models import SessionConfig
+from .worktree import secure_worktree_git_metadata
 
 
 class SystemRunner:
@@ -75,6 +76,7 @@ class RuntimeSetup:
         self._apply_file_permissions(config.results_db, user="root", group="planner", mode=0o640)
         self._apply_file_permissions(config.proposals_db, user="planner", group="root", mode=0o660)
         self._apply_grant_source_permissions(config)
+        self._restore_existing_worktree_git_metadata(config)
 
     def _ensure_directories(self, config: SessionConfig) -> None:
         """Create the directory layout needed by the runtime."""
@@ -214,7 +216,10 @@ class RuntimeSetup:
 
     def _apply_mode(self, path: Path, mode: int) -> None:
         """Apply a POSIX mode to a path."""
-        path.chmod(mode)
+        try:
+            path.chmod(mode)
+        except FileNotFoundError:
+            return
 
     def _walk_descendants(self, path: Path) -> Iterable[Path]:
         """Yield all descendant paths depth-first."""
@@ -224,6 +229,20 @@ class RuntimeSetup:
                 yield root_path / directory
             for filename in files:
                 yield root_path / filename
+
+    def _restore_existing_worktree_git_metadata(self, config: SessionConfig) -> None:
+        """Reapply trial-readable git metadata to any existing slot worktrees."""
+        worktree_root = config.workspace_root / "worktrees"
+        if not worktree_root.exists():
+            return
+        for path in worktree_root.iterdir():
+            if not path.is_dir() or not path.name.startswith("wt-"):
+                continue
+            try:
+                slot = int(path.name.removeprefix("wt-"))
+            except ValueError:
+                continue
+            secure_worktree_git_metadata(config.workspace_root, slot, f"trial-{slot}")
 
 
 def main(argv: list[str] | None = None) -> int:
