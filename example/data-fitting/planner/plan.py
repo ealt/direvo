@@ -9,113 +9,10 @@ proposals using Claude CLI to analyze results and suggest new approaches.
 from __future__ import annotations
 
 import json
-import logging
-import os
-import sqlite3
 import subprocess
-import sys
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
-
-class _JSONLineFormatter(logging.Formatter):
-    """Emit one JSON object per log record, merging ``extra`` fields."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        fields: dict[str, object] = {}
-        for key, value in record.__dict__.items():
-            if key.startswith("_") or key in logging.LogRecord.__dict__:
-                continue
-            fields[key] = value
-        fields["message"] = record.getMessage()
-        return json.dumps(fields, sort_keys=True)
-
-
-def _configure_logging() -> None:
-    _log_dir = os.environ.get("EDEN_LOG_DIR")
-    if _log_dir:
-        handler = logging.FileHandler(os.path.join(_log_dir, "plan.log"))
-        handler.setFormatter(_JSONLineFormatter())
-        logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
-
-def get_head_sha(workspace: str) -> str:
-    """Return the current HEAD commit SHA of the workspace repo."""
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=workspace,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
-
-
-def connect_db(path: str) -> sqlite3.Connection:
-    """Connect to a SQLite database with the planner's access mode."""
-    if Path(path).name == "results.db":
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    else:
-        conn = sqlite3.connect(path)
-        conn.execute("PRAGMA journal_mode=WAL")
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout = 5000")
-    return conn
-
-
-def create_proposal(
-    *,
-    proposals_db: str,
-    proposals_dir: str,
-    priority: float,
-    slug: str,
-    parent_commits: list[str],
-    plan_text: str,
-) -> None:
-    """Create a proposal with its plan.md and database row."""
-    proposal_path = Path(proposals_dir) / slug
-    proposal_path.mkdir(parents=True, exist_ok=True)
-    (proposal_path / "plan.md").write_text(plan_text + "\n")
-
-    conn = connect_db(proposals_db)
-    try:
-        conn.execute(
-            """
-            INSERT INTO proposals (priority, slug, parent_commits, artifacts_uri, status, created_at)
-            VALUES (?, ?, ?, ?, 'ready', datetime('now'))
-            """,
-            (priority, slug, json.dumps(parent_commits), str(proposal_path)),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def get_trial(results_db: str, trial_id: int) -> dict | None:
-    """Fetch a completed trial by ID."""
-    conn = connect_db(results_db)
-    try:
-        row = conn.execute(
-            "SELECT trial_id, commit_sha, r_squared, rmse FROM trials WHERE trial_id = ? AND status = 'success'",
-            (trial_id,),
-        ).fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
-
-
-def get_all_trials(results_db: str) -> list[dict]:
-    """Fetch all completed trials sorted by r_squared descending."""
-    conn = connect_db(results_db)
-    try:
-        rows = conn.execute(
-            "SELECT trial_id, commit_sha, r_squared, rmse FROM trials WHERE status = 'success' ORDER BY r_squared DESC",
-        ).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+from eden.planner_kit import PlannerContext, Proposal, run_planner
 
 
 def read_trial_artifact(trial_id: int, filename: str) -> str | None:
@@ -259,103 +156,51 @@ def generate_claude_proposal(history: str) -> str | None:
     return None
 
 
-def main() -> None:
-    """Run the planner loop."""
-    workspace = "workspace"
-    parallel_trials = 3
-
-    _configure_logging()
-
-    head_sha = get_head_sha(workspace)
-    logger.info("startup", extra={"event": "startup", "parallel_trials": parallel_trials, "head": head_sha})
-
-    proposals_db = ".eden/proposals.db"
-    results_db = ".eden/results.db"
-    proposals_dir = ".eden/proposals"
-
-    initial_batch = parallel_trials + 2
-    for _i, strategy in enumerate(INITIAL_STRATEGIES[:initial_batch]):
-        create_proposal(
-            proposals_db=proposals_db,
-            proposals_dir=proposals_dir,
-            priority=strategy["priority"],
-            slug=strategy["slug"],
-            parent_commits=[head_sha],
-            plan_text=strategy["plan"],
+def _fallback_text(best: dict | None) -> str:
+    """Generate fallback plan text when Claude CLI is unavailable."""
+    if best:
+        return (
+            f"Improve on the best approach so far (Trial {best['trial_id']}, "
+            f"R²={best['r_squared']:.4f}). Try adding more features, adjusting "
+            f"regularization, or combining multiple basis functions. Read the current "
+            f"model.py and make targeted improvements."
         )
-        logger.info("propose", extra={
-            "event": "propose", "slug": strategy["slug"], "priority": strategy["priority"], "parent": head_sha,
-        })
+    return "Try a polynomial regression of degree 4 with np.vander."
 
-    seen_trials: set[int] = set()
-    proposal_counter = initial_batch
 
-    for line in sys.stdin:
-        line = line.strip()
-        if not line or "Trial completed" not in line:
-            continue
-
-        try:
-            trial_id = int(line.split(":")[-1].strip())
-        except (ValueError, IndexError):
-            continue
-
-        logger.info("notify", extra={"event": "notify", "trial_id": trial_id})
-
-        if trial_id in seen_trials:
-            continue
-        seen_trials.add(trial_id)
-
-        trial = get_trial(results_db, trial_id)
-        if trial is None or trial["commit_sha"] is None:
-            continue
-
-        logger.info("result", extra={
-            "event": "result",
-            "trial_id": trial_id,
-            "commit": trial["commit_sha"],
-            "r_squared": trial["r_squared"],
-            "rmse": trial["rmse"],
-        })
-
-        all_trials = get_all_trials(results_db)
-        history = format_history(all_trials)
-        best_trial = all_trials[0] if all_trials else None
-        parent_sha = best_trial["commit_sha"] if best_trial else head_sha
-
-        plan_text = generate_claude_proposal(history)
-        if plan_text is None:
-            plan_text = (
-                (
-                    f"Improve on the best approach so far (Trial {best_trial['trial_id']}, "
-                    f"R²={best_trial['r_squared']:.4f}). Try adding more features, adjusting "
-                    f"regularization, or combining multiple basis functions. Read the current "
-                    f"model.py and make targeted improvements."
-                )
-                if best_trial
-                else "Try a polynomial regression of degree 4 with np.vander."
-            )
-
-        slug = f"strategy-{proposal_counter}-t{trial_id}"
-        priority = (float(trial["r_squared"]) + 1.0) if trial["r_squared"] is not None else 0.0
-
-        create_proposal(
-            proposals_db=proposals_db,
-            proposals_dir=proposals_dir,
-            priority=priority,
-            slug=slug,
-            parent_commits=[parent_sha],
-            plan_text=plan_text,
+def _make_initial_proposals(ctx: PlannerContext) -> list[Proposal]:
+    batch = INITIAL_STRATEGIES[: ctx.parallel_trials + 2]
+    return [
+        Proposal(
+            slug=s["slug"],
+            priority=s["priority"],
+            plan_text=s["plan"],
+            parent_commits=[ctx.head_sha],
         )
-        logger.info("react", extra={
-            "event": "react",
-            "slug": slug,
-            "priority": priority,
-            "parent": parent_sha,
-            "trial_id": trial_id,
-        })
-        proposal_counter += 1
+        for s in batch
+    ]
+
+
+def _make_reactive_proposal(ctx: PlannerContext, proposal_index: int, trial: dict) -> Proposal:
+    all_trials = ctx.get_all_trials(order_by="r_squared DESC")
+    history = format_history(all_trials)
+    best = all_trials[0] if all_trials else None
+    parent_sha = best["commit_sha"] if best else ctx.head_sha
+
+    plan_text = generate_claude_proposal(history) or _fallback_text(best)
+    priority = (float(trial["r_squared"]) + 1.0) if trial["r_squared"] is not None else 0.0
+
+    return Proposal(
+        slug=f"strategy-{proposal_index}-t{trial['trial_id']}",
+        priority=priority,
+        plan_text=plan_text,
+        parent_commits=[parent_sha],
+    )
 
 
 if __name__ == "__main__":
-    main()
+    run_planner(
+        make_initial_proposals=_make_initial_proposals,
+        make_reactive_proposal=_make_reactive_proposal,
+        parallel_trials=3,
+    )
