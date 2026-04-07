@@ -31,7 +31,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-eden = ["sql/*.sql"]
+eden = ["sql/*.sql", "docker/*.sh"]
 
 [tool.ruff]
 line-length = 120

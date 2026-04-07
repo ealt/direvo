@@ -10,7 +10,7 @@ from string import Formatter
 
 import yaml
 
-from .models import FilePermissionGrant, ObjectiveDirection, ObjectiveSpec, SessionConfig
+from .models import DockerConfig, FilePermissionGrant, ObjectiveDirection, ObjectiveSpec, SessionConfig
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _DURATION_RE = re.compile(r"^(?P<value>\d+)(?P<unit>[smhd])$")
@@ -83,6 +83,8 @@ def load_config(config_path: str | Path) -> SessionConfig:
         target_condition=target_condition,
     )
 
+    docker = _validate_docker_config(experiment_root, raw.get("docker"))
+
     return SessionConfig(
         config_path=path,
         experiment_root=experiment_root,
@@ -134,6 +136,7 @@ def load_config(config_path: str | Path) -> SessionConfig:
         proposal_retry_priority_delta=_positive_float_default(
             raw, "proposal_retry_priority_delta", 0.1
         ),
+        docker=docker,
     )
 
 
@@ -377,3 +380,129 @@ def _validate_sql_expressions(
                 connection.execute(f"SELECT 1 FROM trials WHERE ({target_condition}) LIMIT 0")
             except sqlite3.Error as exc:
                 raise ConfigError(f"target_condition is not a valid SQL WHERE clause: {target_condition}") from exc
+
+
+_KNOWN_DOCKER_TOOLS = {"claude", "codex"}
+
+
+def _validate_docker_config(
+    experiment_root: Path, value: object
+) -> DockerConfig | None:
+    """Validate the optional docker configuration section."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ConfigError("docker must be a mapping when provided.")
+
+    tools = _validate_string_list(value.get("tools", []), "docker.tools")
+    for tool in tools:
+        if tool not in _KNOWN_DOCKER_TOOLS:
+            raise ConfigError(
+                f"Unknown docker tool: {tool!r}. Known tools: {sorted(_KNOWN_DOCKER_TOOLS)}"
+            )
+
+    dependencies = _validate_string_list(
+        value.get("dependencies", []), "docker.dependencies"
+    )
+    pip_dependencies = _validate_string_list(
+        value.get("pip_dependencies", []), "docker.pip_dependencies"
+    )
+
+    dockerfile = _validate_docker_path(
+        experiment_root, value.get("dockerfile"), "docker.dockerfile"
+    )
+    entrypoint = _validate_docker_path(
+        experiment_root, value.get("entrypoint"), "docker.entrypoint"
+    )
+
+    setup_command = value.get("setup_command")
+    if setup_command is not None:
+        if not isinstance(setup_command, str) or not setup_command.strip():
+            raise ConfigError(
+                "docker.setup_command must be a non-empty string when provided."
+            )
+        setup_command = setup_command.strip()
+
+    export_disabled = False
+    export_command: str | None = None
+    if "export_command" in value:
+        raw_export = value["export_command"]
+        if raw_export is None:
+            export_disabled = True
+        elif isinstance(raw_export, str) and raw_export.strip():
+            export_command = raw_export.strip()
+        else:
+            raise ConfigError(
+                "docker.export_command must be a non-empty string or null."
+            )
+
+    image_name = value.get("image_name")
+    if image_name is not None:
+        if not isinstance(image_name, str) or not image_name.strip():
+            raise ConfigError(
+                "docker.image_name must be a non-empty string when provided."
+            )
+        image_name = image_name.strip()
+
+    git_user_name, git_user_email = _validate_docker_git_config(
+        value.get("git_config")
+    )
+
+    return DockerConfig(
+        tools=tuple(tools),
+        dependencies=tuple(dependencies),
+        pip_dependencies=tuple(pip_dependencies),
+        dockerfile=dockerfile,
+        entrypoint=entrypoint,
+        setup_command=setup_command,
+        export_command=export_command,
+        export_disabled=export_disabled,
+        image_name=image_name,
+        git_user_name=git_user_name,
+        git_user_email=git_user_email,
+    )
+
+
+def _validate_string_list(value: object, key: str) -> list[str]:
+    """Validate a config value as a list of non-empty strings."""
+    if not isinstance(value, list):
+        raise ConfigError(f"{key} must be a list.")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ConfigError(f"{key} entries must be non-empty strings.")
+        result.append(item.strip())
+    return result
+
+
+def _validate_docker_path(
+    experiment_root: Path, value: object, key: str
+) -> Path | None:
+    """Validate an optional path that must point to an existing file under experiment_root."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{key} must be a non-empty string when provided.")
+    path = _resolve_path(experiment_root, value.strip())
+    if not path.exists():
+        raise ConfigError(f"{key} does not exist: {path}")
+    if not path.is_file():
+        raise ConfigError(f"{key} is not a file: {path}")
+    if experiment_root not in path.resolve().parents and path.resolve() != experiment_root:
+        raise ConfigError(f"{key} must be under experiment_root: {path}")
+    return path
+
+
+def _validate_docker_git_config(value: object) -> tuple[str, str]:
+    """Validate the docker git_config section, returning (user_name, user_email)."""
+    if value is None:
+        return ("eden", "eden@experiment")
+    if not isinstance(value, dict):
+        raise ConfigError("docker.git_config must be a mapping when provided.")
+    user_name = value.get("user_name", "eden")
+    user_email = value.get("user_email", "eden@experiment")
+    if not isinstance(user_name, str) or not user_name.strip():
+        raise ConfigError("docker.git_config.user_name must be a non-empty string.")
+    if not isinstance(user_email, str) or not user_email.strip():
+        raise ConfigError("docker.git_config.user_email must be a non-empty string.")
+    return (user_name.strip(), user_email.strip())

@@ -17,3 +17,17 @@ objective:
 file_permissions:
   - path: "train.npz"
     grant: "implementer"
+docker:
+  tools:
+    - claude
+    - codex
+  dependencies:
+    - ripgrep
+    - bubblewrap
+    - patch
+  pip_dependencies:
+    - numpy
+  setup_command: "python3 generate_data.py"
+  git_config:
+    user_name: "eden"
+    user_email: "eden@experiment"

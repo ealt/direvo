@@ -21,7 +21,7 @@ class PlannerSession:
         """Start the planner session."""
         return None
 
-    def notify_trial_completed(self, trial_id: int) -> None:
+    def notify_trial_completed(self, trial_id: int) -> None:  # TODO: fix all pyright issues
         """Notify the planner about a completed trial."""
         return None
 

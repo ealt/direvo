@@ -9,12 +9,13 @@ Unix user isolation.
 
 ```bash
 # From the repo root:
-./example/data-fitting/run.sh
+eden docker run --config example/data-fitting/.eden/config.yaml --output ./output
 ```
 
-That's it. The script builds a Docker image (installs eden + both CLIs,
-initializes the workspace git repo, copies the experiment) and runs the
-experiment with `--privileged` for user isolation.
+That's it. The `eden docker` command reads the config's `docker:` section,
+generates a Dockerfile (installs eden + both CLIs, initializes the workspace
+git repo, copies the experiment), builds the image, and runs it with
+`--privileged` for user isolation.
 
 ## Prerequisites
 
@@ -22,8 +23,8 @@ experiment with `--privileged` for user isolation.
 - Claude CLI logged in (`claude auth login`)
 - Codex CLI logged in (`codex auth login`)
 
-The run script mounts your local CLI auth directories into the container —
-no API keys needed.
+`eden docker` automatically detects and mounts your local CLI auth directories
+into the container — no API keys needed.
 
 ## What Happens
 
@@ -61,11 +62,9 @@ no API keys needed.
 
 ## Authentication
 
-The run script mounts your host CLI auth directories into the container,
-following the same auth-passthrough pattern used by
-[garth](../../docs/plans/v0.md). The `auth-setup.sh` entrypoint wrapper
-makes the mounted directories traversable by trial users so both Claude
-(planner) and Codex (implementer) can authenticate.
+`eden docker` mounts your host CLI auth directories into the container. The
+generic entrypoint runs `eden-auth-setup` to make them traversable by trial
+users so both Claude (planner) and Codex (implementer) can authenticate.
 
 Mounted paths (when they exist on the host):
 
@@ -87,9 +86,6 @@ eval.py                    Evaluator: scores on hidden test set, writes report
 generate_data.py           Regenerate train/test data (deterministic, seed=42)
 train.npz                  Training data (granted to implementer)
 test.npz                   Test data (hidden from planner and implementer)
-auth-setup.sh              Entrypoint wrapper: propagates host auth to trial users
-Dockerfile                 Demo container image
-run.sh                     Build + run script
 planner/                   Planner scope
   plan.py                  Persistent subprocess, single Claude session
   workspace/               Git repo (initialized in Docker, not on host)

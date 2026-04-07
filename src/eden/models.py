@@ -41,6 +41,23 @@ class ObjectiveSpec:
 
 
 @dataclass(frozen=True)
+class DockerConfig:
+    """Validated Docker image configuration."""
+
+    tools: tuple[str, ...]
+    dependencies: tuple[str, ...]
+    pip_dependencies: tuple[str, ...]
+    dockerfile: Path | None
+    entrypoint: Path | None
+    setup_command: str | None
+    export_command: str | None
+    export_disabled: bool
+    image_name: str | None
+    git_user_name: str
+    git_user_email: str
+
+
+@dataclass(frozen=True)
 class SessionConfig:
     """Fully validated session config."""
 
@@ -69,6 +86,7 @@ class SessionConfig:
     evaluation_timeout_sec: int
     sqlite_busy_timeout_ms: int
     proposal_retry_priority_delta: float
+    docker: DockerConfig | None
 
 
 @dataclass(frozen=True)
