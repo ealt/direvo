@@ -17,6 +17,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -67,6 +68,28 @@ def log_event(logger: logging.Logger, **fields: object) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Artifact reading
+# ---------------------------------------------------------------------------
+
+
+def read_trial_artifact(artifacts_dir: str, trial_id: int, filename: str) -> str | None:
+    """Read a text artifact file from a completed trial.
+
+    Intended for text artifacts (plan.md, notes.md, eval_report.json).
+    Returns the stripped file contents, or None if the file does not exist,
+    is not a regular file, or cannot be decoded as UTF-8.
+    """
+    path = Path(artifacts_dir) / f"trial-{trial_id}" / filename
+    if not path.is_file():
+        return None
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        logging.debug("Failed to read artifact %s", path)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Data types
 # ---------------------------------------------------------------------------
 
@@ -91,6 +114,7 @@ class PlannerContext:
     results_db: str
     proposals_db: str
     proposals_dir: str
+    artifacts_dir: str
     workspace: str
     logger: logging.Logger
 
@@ -101,6 +125,10 @@ class PlannerContext:
     def get_all_trials(self, *, order_by: str | None = None) -> list[dict]:
         """Fetch all completed trials."""
         return get_all_trials(self.results_db, order_by=order_by)
+
+    def read_trial_artifact(self, trial_id: int, filename: str) -> str | None:
+        """Read a text artifact file from a completed trial."""
+        return read_trial_artifact(self.artifacts_dir, trial_id, filename)
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +254,100 @@ def iter_trial_notifications() -> Iterator[int]:
 
 
 # ---------------------------------------------------------------------------
+# Agent session
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AgentSession(ABC):
+    """Base class for persistent CLI agent sessions.
+
+    Subclasses define how to build the CLI command for a given prompt.
+    The base class handles subprocess execution, timeout, error handling,
+    and session-started state tracking.
+    """
+
+    timeout: int = 120
+    _started: bool = field(default=False, init=False, repr=False)
+
+    @abstractmethod
+    def _build_command(self, prompt: str) -> list[str]:
+        """Build the CLI command list for the given prompt."""
+        ...
+
+    def generate(self, prompt: str) -> str | None:
+        """Send a prompt to the agent and return the response.
+
+        Returns None on timeout, missing CLI binary, non-zero exit, or
+        empty output.  Logs failures at DEBUG level for diagnostics.
+        """
+        cmd = self._build_command(prompt)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=self.timeout
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                self._started = True
+                return result.stdout.strip()
+            logging.debug("Agent CLI returned rc=%d: %s", result.returncode, result.stderr[:200])
+        except subprocess.TimeoutExpired:
+            logging.debug("Agent CLI timed out after %ds", self.timeout)
+        except FileNotFoundError:
+            logging.debug("Agent CLI binary not found: %s", cmd[0])
+        return None
+
+
+@dataclass
+class ClaudeSession(AgentSession):
+    """Claude CLI session with automatic session continuity.
+
+    On the first call, starts a new session with optional system prompt
+    configuration.  Subsequent calls append ``-c`` to continue the session.
+
+    System prompt flags (applied only on the first successful call):
+
+    - *append_system_prompt_file*: ``--append-system-prompt-file`` (additive,
+      preserves Claude's built-in capabilities — recommended)
+    - *append_system_prompt*: ``--append-system-prompt`` (additive, inline)
+    - *system_prompt*: ``--system-prompt`` (full replacement)
+    - *system_prompt_file*: ``--system-prompt-file`` (full replacement from file)
+
+    At most one should be set.  If multiple are set, ``__post_init__``
+    raises ``ValueError``.
+    """
+
+    append_system_prompt_file: Path | None = None
+    append_system_prompt: str | None = None
+    system_prompt: str | None = None
+    system_prompt_file: Path | None = None
+
+    def __post_init__(self) -> None:
+        opts = [
+            self.append_system_prompt_file,
+            self.append_system_prompt,
+            self.system_prompt,
+            self.system_prompt_file,
+        ]
+        if sum(o is not None for o in opts) > 1:
+            raise ValueError("ClaudeSession accepts at most one system prompt option")
+
+    def _build_command(self, prompt: str) -> list[str]:
+        cmd = ["claude", "-p", prompt]
+        if self._started:
+            cmd.append("-c")
+        else:
+            if self.append_system_prompt_file is not None:
+                cmd.extend(["--append-system-prompt-file", str(self.append_system_prompt_file)])
+            elif self.append_system_prompt is not None:
+                cmd.extend(["--append-system-prompt", self.append_system_prompt])
+            elif self.system_prompt_file is not None:
+                cmd.extend(["--system-prompt-file", str(self.system_prompt_file)])
+            elif self.system_prompt is not None:
+                cmd.extend(["--system-prompt", self.system_prompt])
+        return cmd
+
+
+# ---------------------------------------------------------------------------
 # High-level runner
 # ---------------------------------------------------------------------------
 
@@ -246,6 +368,7 @@ def run_planner(
     proposals_db: str = ".eden/proposals.db",
     results_db: str = ".eden/results.db",
     proposals_dir: str = ".eden/proposals",
+    artifacts_dir: str = ".eden/artifacts",
 ) -> None:
     """Run the standard planner main loop.
 
@@ -268,6 +391,7 @@ def run_planner(
         results_db=results_db,
         proposals_db=proposals_db,
         proposals_dir=proposals_dir,
+        artifacts_dir=artifacts_dir,
         workspace=workspace,
         logger=logger,
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 from unittest import mock
@@ -12,6 +13,8 @@ from unittest import mock
 import pytest
 
 from eden.planner_kit import (
+    AgentSession,
+    ClaudeSession,
     PlannerContext,
     Proposal,
     configure_logging,
@@ -23,6 +26,7 @@ from eden.planner_kit import (
     get_trial,
     iter_trial_notifications,
     log_event,
+    read_trial_artifact,
     run_planner,
 )
 
@@ -563,3 +567,164 @@ def test_run_planner_logs_all_events(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert react["priority"] == 42.0
     assert react["parent"] == "sha1"
     assert react["trial_id"] == tid
+
+
+# ---------------------------------------------------------------------------
+# read_trial_artifact
+# ---------------------------------------------------------------------------
+
+
+def test_read_trial_artifact_returns_content(tmp_path: Path) -> None:
+    artifact_dir = tmp_path / "artifacts" / "trial-1"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "plan.md").write_text("Do something clever\n")
+    result = read_trial_artifact(str(tmp_path / "artifacts"), 1, "plan.md")
+    assert result == "Do something clever"
+
+
+def test_read_trial_artifact_returns_none_for_missing(tmp_path: Path) -> None:
+    (tmp_path / "artifacts").mkdir()
+    result = read_trial_artifact(str(tmp_path / "artifacts"), 99, "plan.md")
+    assert result is None
+
+
+def test_read_trial_artifact_strips_whitespace(tmp_path: Path) -> None:
+    artifact_dir = tmp_path / "artifacts" / "trial-2"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "notes.md").write_text("  some notes  \n\n")
+    result = read_trial_artifact(str(tmp_path / "artifacts"), 2, "notes.md")
+    assert result == "some notes"
+
+
+def test_read_trial_artifact_returns_none_for_directory(tmp_path: Path) -> None:
+    """Returns None when the artifact path is a directory, not a file."""
+    artifact_dir = tmp_path / "artifacts" / "trial-1"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "subdir").mkdir()
+    result = read_trial_artifact(str(tmp_path / "artifacts"), 1, "subdir")
+    assert result is None
+
+
+def test_read_trial_artifact_returns_none_for_unreadable(tmp_path: Path) -> None:
+    """Returns None when the file cannot be decoded as UTF-8."""
+    artifact_dir = tmp_path / "artifacts" / "trial-1"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "binary.bin").write_bytes(b"\x80\x81\x82\xff")
+    result = read_trial_artifact(str(tmp_path / "artifacts"), 1, "binary.bin")
+    assert result is None
+
+
+def test_planner_context_read_trial_artifact(tmp_path: Path) -> None:
+    """PlannerContext.read_trial_artifact delegates to the module-level function."""
+    artifact_dir = tmp_path / "artifacts" / "trial-1"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "plan.md").write_text("test content\n")
+
+    ctx = PlannerContext(
+        head_sha="abc",
+        parallel_trials=1,
+        results_db="",
+        proposals_db="",
+        proposals_dir="",
+        artifacts_dir=str(tmp_path / "artifacts"),
+        workspace="",
+        logger=configure_logging("test_ctx_artifact"),
+    )
+    assert ctx.read_trial_artifact(1, "plan.md") == "test content"
+    assert ctx.read_trial_artifact(1, "missing.md") is None
+
+
+# ---------------------------------------------------------------------------
+# AgentSession / ClaudeSession
+# ---------------------------------------------------------------------------
+
+
+class _DummySession(AgentSession):
+    """Concrete subclass for testing the base class."""
+
+    def _build_command(self, prompt: str) -> list[str]:
+        return ["echo", prompt]
+
+
+def test_claude_session_append_system_prompt_file() -> None:
+    s = ClaudeSession(append_system_prompt_file=Path("CLAUDE.md"))
+    cmd = s._build_command("hello")
+    assert cmd == ["claude", "-p", "hello", "--append-system-prompt-file", "CLAUDE.md"]
+
+
+def test_claude_session_append_system_prompt() -> None:
+    s = ClaudeSession(append_system_prompt="Be helpful")
+    cmd = s._build_command("hello")
+    assert cmd == ["claude", "-p", "hello", "--append-system-prompt", "Be helpful"]
+
+
+def test_claude_session_replace_system_prompt() -> None:
+    s = ClaudeSession(system_prompt="You are a bot")
+    cmd = s._build_command("hello")
+    assert cmd == ["claude", "-p", "hello", "--system-prompt", "You are a bot"]
+
+
+def test_claude_session_replace_system_prompt_file() -> None:
+    s = ClaudeSession(system_prompt_file=Path("prompt.txt"))
+    cmd = s._build_command("hello")
+    assert cmd == ["claude", "-p", "hello", "--system-prompt-file", "prompt.txt"]
+
+
+def test_claude_session_no_system_prompt() -> None:
+    s = ClaudeSession()
+    cmd = s._build_command("hello")
+    assert cmd == ["claude", "-p", "hello"]
+
+
+def test_claude_session_continuation() -> None:
+    s = ClaudeSession(append_system_prompt="Be helpful")
+    # Simulate a successful first call
+    s._started = True
+    cmd = s._build_command("followup")
+    assert cmd == ["claude", "-p", "followup", "-c"]
+    assert "--append-system-prompt" not in cmd
+
+
+def test_claude_session_retry_after_failure() -> None:
+    """System prompt is still sent if the first call failed."""
+    s = ClaudeSession(append_system_prompt_file=Path("CLAUDE.md"))
+    # _started is still False (no successful call yet)
+    cmd = s._build_command("retry")
+    assert "--append-system-prompt-file" in cmd
+
+
+def test_claude_session_rejects_multiple_prompt_options() -> None:
+    with pytest.raises(ValueError, match="at most one"):
+        ClaudeSession(system_prompt="x", append_system_prompt="y")
+
+
+def test_agent_session_returns_none_on_timeout() -> None:
+    s = _DummySession(timeout=1)
+    with mock.patch("eden.planner_kit.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=[], timeout=1)):
+        result = s.generate("hello")
+    assert result is None
+
+
+def test_agent_session_returns_none_on_missing_binary() -> None:
+    s = _DummySession()
+    with mock.patch("eden.planner_kit.subprocess.run", side_effect=FileNotFoundError):
+        result = s.generate("hello")
+    assert result is None
+
+
+def test_agent_session_generate_success() -> None:
+    s = _DummySession()
+    mock_result = mock.Mock(returncode=0, stdout="response text\n", stderr="")
+    with mock.patch("eden.planner_kit.subprocess.run", return_value=mock_result):
+        result = s.generate("hello")
+    assert result == "response text"
+    assert s._started is True
+
+
+def test_agent_session_generate_nonzero_exit() -> None:
+    s = _DummySession()
+    mock_result = mock.Mock(returncode=1, stdout="", stderr="error")
+    with mock.patch("eden.planner_kit.subprocess.run", return_value=mock_result):
+        result = s.generate("hello")
+    assert result is None
+    assert s._started is False

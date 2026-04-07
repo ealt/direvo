@@ -9,21 +9,14 @@ proposals using Claude CLI to analyze results and suggest new approaches.
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
-from eden.planner_kit import PlannerContext, Proposal, run_planner
+from eden.planner_kit import ClaudeSession, PlannerContext, Proposal, run_planner
+
+session = ClaudeSession(append_system_prompt_file=Path("planner-prompt.md"))
 
 
-def read_trial_artifact(trial_id: int, filename: str) -> str | None:
-    """Read an artifact file from a completed trial."""
-    path = Path(f".eden/artifacts/trial-{trial_id}/{filename}")
-    if path.exists():
-        return path.read_text(encoding="utf-8").strip()
-    return None
-
-
-def format_history(trials: list[dict]) -> str:
+def format_history(ctx: PlannerContext, trials: list[dict]) -> str:
     """Format trial history for the Claude prompt.
 
     Reads three artifact types per trial (all produced during the trial lifecycle):
@@ -36,9 +29,9 @@ def format_history(trials: list[dict]) -> str:
     lines = []
     for t in trials[:10]:
         tid = t["trial_id"]
-        plan_text = read_trial_artifact(tid, "plan.md")
-        notes = read_trial_artifact(tid, "notes.md")
-        eval_report = read_trial_artifact(tid, "eval_report.json")
+        plan_text = ctx.read_trial_artifact(tid, "plan.md")
+        notes = ctx.read_trial_artifact(tid, "notes.md")
+        eval_report = ctx.read_trial_artifact(tid, "eval_report.json")
 
         summary = (notes or plan_text or "Unknown approach")[:200]
         line = f"- Trial {tid}: R²={t['r_squared']:.4f}, RMSE={t['rmse']:.4f} | {summary}"
@@ -104,58 +97,6 @@ INITIAL_STRATEGIES = [
 ]
 
 
-_SYSTEM_PROMPT = (
-    "You are a data science strategist for a data-fitting experiment.\n"
-    "The task is to predict y from x values. The training data has 150 points "
-    "with x in [-3, 3].\n"
-    "The model must implement predict(X_train, y_train, X_test) -> np.ndarray.\n"
-    "Only numpy is available (no sklearn, scipy, or other libraries).\n\n"
-    "When asked, propose ONE specific modeling approach in 2-4 sentences. "
-    "Be specific about the mathematical formulation. Output ONLY the strategy "
-    "description, no code."
-)
-
-# Accumulated session: first call starts a new conversation, subsequent calls
-# continue it with -c so Claude retains context of all prior proposals/results.
-_session_started = False
-
-
-def generate_claude_proposal(history: str) -> str | None:
-    """Use Claude CLI to generate a new model strategy based on trial history.
-
-    Maintains a single Claude session across the planner's lifetime so that
-    Claude accumulates context about all strategies it has proposed and their
-    outcomes, rather than starting cold each time.
-    """
-    global _session_started  # noqa: PLW0603
-
-    prompt = (
-        f"Latest trial results (sorted by R²):\n{history}\n\n"
-        "Propose the next approach. It must be different from everything you "
-        "have already suggested."
-    )
-
-    cmd = ["claude", "-p", prompt, "--no-input"]
-    if _session_started:
-        cmd.append("-c")
-    else:
-        cmd.extend(["-s", _SYSTEM_PROMPT])
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            _session_started = True
-            return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-    return None
-
-
 def _fallback_text(best: dict | None) -> str:
     """Generate fallback plan text when Claude CLI is unavailable."""
     if best:
@@ -183,11 +124,16 @@ def _make_initial_proposals(ctx: PlannerContext) -> list[Proposal]:
 
 def _make_reactive_proposal(ctx: PlannerContext, proposal_index: int, trial: dict) -> Proposal:
     all_trials = ctx.get_all_trials(order_by="r_squared DESC")
-    history = format_history(all_trials)
+    history = format_history(ctx, all_trials)
     best = all_trials[0] if all_trials else None
     parent_sha = best["commit_sha"] if best else ctx.head_sha
 
-    plan_text = generate_claude_proposal(history) or _fallback_text(best)
+    prompt = (
+        f"Latest trial results (sorted by R²):\n{history}\n\n"
+        "Propose the next approach. It must be different from everything you "
+        "have already suggested."
+    )
+    plan_text = session.generate(prompt) or _fallback_text(best)
     priority = (float(trial["r_squared"]) + 1.0) if trial["r_squared"] is not None else 0.0
 
     return Proposal(
