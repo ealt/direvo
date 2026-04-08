@@ -40,6 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--tag", default=None)
     docker_sub.choices["run"].add_argument("--output", default=None)
 
+    ui_parser = subparsers.add_parser("ui")
+    ui_group = ui_parser.add_mutually_exclusive_group(required=True)
+    ui_group.add_argument("--config", default=None)
+    ui_group.add_argument("--experiment-dir", default=None)
+    ui_parser.add_argument("--port", type=int, default=8741)
+    ui_parser.add_argument("--no-open", action="store_true")
+    ui_parser.add_argument("--dev", action="store_true")
+
     return parser
 
 
@@ -62,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "docker":
             return _docker_command(args)
+        if args.command == "ui":
+            return _ui_command(args)
     except (ConfigError, RuntimeError, sqlite3.Error) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -90,6 +100,51 @@ def _docker_command(args: argparse.Namespace) -> int:
 
     output_dir = Path(args.output) if args.output else None
     return run_container(config, tag=tag, output_dir=output_dir)
+
+
+def _ui_command(args: argparse.Namespace) -> int:
+    """Handle eden ui command."""
+    try:
+        import uvicorn
+    except ImportError:
+        print("error: eden[web] extras not installed. Run: uv pip install 'direvo[web]'", file=sys.stderr)
+        return 1
+
+    from .web.server import create_app
+
+    config_path = Path(args.config) if args.config else None
+    experiment_dir = Path(args.experiment_dir) if args.experiment_dir else None
+
+    # Locate SPA build directory.
+    spa_dir: Path | None = None
+    if not args.dev:
+        # Check source-tree location first, then installed package.
+        candidates = [
+            Path(__file__).resolve().parent.parent.parent / "packages" / "web-ui" / "dist",
+            Path(__file__).resolve().parent / "web" / "static",
+        ]
+        for candidate in candidates:
+            if candidate.is_dir():
+                spa_dir = candidate
+                break
+        if spa_dir is None:
+            print(
+                "warning: SPA build not found. Run 'cd packages/web-ui && npm run build' first,\n"
+                "  or use --dev to proxy to the Vite dev server.",
+                file=sys.stderr,
+            )
+
+    app = create_app(config_path=config_path, experiment_dir=experiment_dir, dev=args.dev, spa_dir=spa_dir)
+    port = args.port
+
+    if not args.no_open and not args.dev:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.0, webbrowser.open, args=[f"http://localhost:{port}"]).start()
+
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    return 0
 
 
 def doctor(config_path: Path) -> int:

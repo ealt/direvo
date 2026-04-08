@@ -1,0 +1,134 @@
+.viewer {
+  display: flex;
+  gap: 16px;
+  height: calc(100vh - 120px);
+}
+
+.sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.sidebar h4 {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.trialList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trialItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: transparent;
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  font-size: 0.9em;
+  text-align: left;
+}
+
+.trialItem:hover {
+  background: var(--bg-hover);
+}
+
+.selected {
+  background: var(--bg-hover);
+}
+
+.trialId {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.trialStatus {
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fileTabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+
+.fileTab {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 4px 12px;
+  border-radius: var(--radius);
+  font-size: 0.85em;
+  font-family: var(--font-mono);
+}
+
+.fileTab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.activeTab {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.fileContent {
+  flex: 1;
+  overflow: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+.markdown {
+  line-height: 1.7;
+}
+
+.markdown h1, .markdown h2, .markdown h3 {
+  margin: 16px 0 8px;
+}
+
+.markdown p {
+  margin: 8px 0;
+}
+
+.markdown code {
+  background: var(--bg);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.markdown pre {
+  background: var(--bg);
+  padding: 12px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.json, .pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.placeholder, .empty {
+  color: var(--text-muted);
+  padding: 20px;
+}

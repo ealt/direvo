@@ -36,6 +36,10 @@ dev = [
   "pytest-cov>=5.0",
   "ruff>=0.5",
 ]
+web = [
+  "starlette>=0.40",
+  "uvicorn[standard]>=0.30",
+]
 
 [project.scripts]
 eden = "eden.cli:main"
@@ -48,7 +52,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-eden = ["sql/*.sql", "docker/*.sh", "templates/**/*", "templates/**/.*", "templates/**/.agents/**/*"]
+eden = ["sql/*.sql", "docker/*.sh", "templates/**/*", "templates/**/.*", "templates/**/.agents/**/*", "web/static/**/*"]
 
 [tool.ruff]
 line-length = 120

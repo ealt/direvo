@@ -1,0 +1,142 @@
+.explorer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: calc(100vh - 120px);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 4px 12px;
+  border-radius: var(--radius);
+  font-size: 0.85em;
+}
+
+.tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.active {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.content {
+  flex: 1;
+  overflow: auto;
+}
+
+.sqlConsole {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sqlControls {
+  display: flex;
+  gap: 8px;
+}
+
+.sqlInput {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  resize: vertical;
+  min-height: 80px;
+}
+
+.error {
+  color: var(--error);
+  font-size: 0.9em;
+  padding: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--error);
+  border-radius: var(--radius);
+}
+
+.resultTable {
+  overflow: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.resultTable table {
+  font-size: 0.9em;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+.null {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.rowCount {
+  padding: 6px 12px;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+.logViewer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+
+.logFilter {
+  max-width: 300px;
+}
+
+.logEntries {
+  flex: 1;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 8px;
+}
+
+.logEntry {
+  display: flex;
+  gap: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.logTime {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.logEvent {
+  color: var(--accent);
+  flex-shrink: 0;
+  min-width: 180px;
+}
+
+.logDetail {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 20px;
+}

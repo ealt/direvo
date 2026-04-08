@@ -1,0 +1,77 @@
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.bestCard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+.bestCard h3 {
+  font-size: 1.1em;
+  margin-bottom: 4px;
+}
+
+.branch {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.bestMetrics {
+  display: flex;
+  gap: 24px;
+  margin-top: 14px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+}
+
+.metricName {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.metricValue {
+  font-size: 1.4em;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.objective {
+  margin-top: 10px;
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 20px;
+}
+
+.chart {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+.chart h4 {
+  margin-bottom: 12px;
+  font-size: 0.95em;
+  color: var(--text-muted);
+}
+
+.empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 40px;
+}
