@@ -128,7 +128,7 @@ cd packages/web-ui && npm install && npm run build && cd ../..
 eden ui --config .eden/config.yaml
 
 # View an exported experiment
-eden ui --experiment-dir ./direvo-output-20260401-143000/
+eden ui --experiment-dir ./eden-output-20260401-143000/
 ```
 
 The UI provides five views: **Metrics** (charts with convergence tracking),
