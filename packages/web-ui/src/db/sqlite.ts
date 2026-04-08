@@ -1,12 +1,12 @@
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
+import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 
 let SQL: SqlJsStatic | null = null;
 
 async function getSql(): Promise<SqlJsStatic> {
   if (!SQL) {
     SQL = await initSqlJs({
-      locateFile: (file: string) =>
-        `https://sql.js.org/dist/${file}`,
+      locateFile: () => sqlWasmUrl,
     });
   }
   return SQL;

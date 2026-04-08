@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.resources
 import shutil
 import subprocess
-from importlib.abc import Traversable
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 
