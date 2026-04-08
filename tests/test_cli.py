@@ -110,3 +110,84 @@ def test_main_run_prints_summary(monkeypatch: pytest.MonkeyPatch, capsys: pytest
     assert orchestrators
     assert orchestrators[0].ran
     assert capsys.readouterr().out == "summary\n"
+
+
+def test_docker_build_parses_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
+    build_calls: list[tuple[object, str | None]] = []
+
+    def fake_load_config(path: Path) -> SimpleNamespace:
+        return SimpleNamespace(docker=SimpleNamespace())
+
+    def fake_build_image(config: object, *, tag: str | None = None) -> str:
+        build_calls.append((config, tag))
+        return tag or "test-image"
+
+    monkeypatch.setattr("eden.cli.load_config", fake_load_config)
+    monkeypatch.setattr("eden.cli.build_image", fake_build_image)
+    monkeypatch.setattr("shutil.which", lambda cmd: f"/usr/bin/{cmd}")
+
+    assert main(["docker", "build", "--config", "config.yaml"]) == 0
+    assert len(build_calls) == 1
+    assert build_calls[0][1] is None
+
+
+def test_docker_build_with_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    build_calls: list[tuple[object, str | None]] = []
+
+    def fake_load_config(path: Path) -> SimpleNamespace:
+        return SimpleNamespace(docker=SimpleNamespace())
+
+    def fake_build_image(config: object, *, tag: str | None = None) -> str:
+        build_calls.append((config, tag))
+        return tag or "test-image"
+
+    monkeypatch.setattr("eden.cli.load_config", fake_load_config)
+    monkeypatch.setattr("eden.cli.build_image", fake_build_image)
+    monkeypatch.setattr("shutil.which", lambda cmd: f"/usr/bin/{cmd}")
+
+    assert main(["docker", "build", "--config", "c.yaml", "--tag", "my-tag"]) == 0
+    assert build_calls[0][1] == "my-tag"
+
+
+def test_docker_run_calls_build_and_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    run_calls: list[tuple[object, str, Path | None]] = []
+
+    def fake_load_config(path: Path) -> SimpleNamespace:
+        return SimpleNamespace(docker=SimpleNamespace())
+
+    def fake_build_image(config: object, *, tag: str | None = None) -> str:
+        return tag or "test-image"
+
+    def fake_run_container(config: object, *, tag: str, output_dir: Path | None = None) -> int:
+        run_calls.append((config, tag, output_dir))
+        return 0
+
+    monkeypatch.setattr("eden.cli.load_config", fake_load_config)
+    monkeypatch.setattr("eden.cli.build_image", fake_build_image)
+    monkeypatch.setattr("eden.cli.run_container", fake_run_container)
+    monkeypatch.setattr("shutil.which", lambda cmd: f"/usr/bin/{cmd}")
+
+    assert main(["docker", "run", "--config", "c.yaml", "--output", "/tmp/out"]) == 0
+    assert len(run_calls) == 1
+    assert run_calls[0][1] == "test-image"
+    assert run_calls[0][2] == Path("/tmp/out")
+
+
+def test_docker_rejects_missing_docker_section(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_load_config(path: Path) -> SimpleNamespace:
+        return SimpleNamespace(docker=None)
+
+    monkeypatch.setattr("eden.cli.load_config", fake_load_config)
+    monkeypatch.setattr("shutil.which", lambda cmd: f"/usr/bin/{cmd}")
+
+    assert main(["docker", "build", "--config", "c.yaml"]) == 1
+
+
+def test_docker_rejects_missing_docker_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_load_config(path: Path) -> SimpleNamespace:
+        return SimpleNamespace(docker=SimpleNamespace())
+
+    monkeypatch.setattr("eden.cli.load_config", fake_load_config)
+    monkeypatch.setattr("shutil.which", lambda cmd: None)
+
+    assert main(["docker", "build", "--config", "c.yaml"]) == 1

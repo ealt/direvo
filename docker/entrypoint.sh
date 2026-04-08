@@ -1,6 +1,17 @@
 #!/bin/sh
+# Backward-compat wrapper. The canonical entrypoint ships inside the package
+# at src/eden/docker/entrypoint.sh and is installed during image build.
+#
+# If eden-container-entrypoint is available (the canonical entrypoint), delegate
+# to it. Otherwise fall back to the inline logic for the base Dockerfile which
+# does not install the full docker package scripts.
 set -eu
 
+if command -v eden-container-entrypoint >/dev/null 2>&1; then
+    exec eden-container-entrypoint "$@"
+fi
+
+# Fallback: inline logic for the base Dockerfile.
 if [ "$#" -eq 0 ]; then
   echo "usage: eden-entrypoint [run|doctor] --config PATH" >&2
   exit 2

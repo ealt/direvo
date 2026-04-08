@@ -8,6 +8,31 @@ EDEN is an orchestration engine for directed code evolution. A planner proposes
 experiments, parallel trials run in isolated environments, and results feed back
 into the next round — an automated loop of diversify, evaluate, amplify.
 
+## Install
+
+```bash
+pip install direvo
+```
+
+This gives you both `eden` and `direvo` as CLI commands. The package is called
+`direvo` on PyPI; the tool is called EDEN.
+
+## Quick start
+
+```bash
+# Scaffold a new experiment
+eden init my-experiment
+cd my-experiment
+
+# Edit eval.py, implement.py, and .eden/config.yaml for your use case
+
+# Validate your setup
+eden doctor --config .eden/config.yaml
+
+# Run in Docker (recommended)
+eden docker run --config .eden/config.yaml
+```
+
 ## What it does
 
 Most research automation tools are either a single-agent loop (try something,
@@ -30,15 +55,6 @@ The architecture mirrors directed evolution in the lab:
 | Iterative rounds           | The propose → execute → evaluate loop             |
 | Intelligent guidance       | Planner is strategic, not random                  |
 
-## Quick start
-
-```bash
-uv sync --dev
-uv run -m pytest -q        # run the test suite
-eden doctor --config .eden/config.yaml  # validate a config
-eden run    --config .eden/config.yaml  # run an experiment
-```
-
 ## Configuration
 
 An experiment lives in a directory with a `.eden/config.yaml`:
@@ -46,7 +62,7 @@ An experiment lives in a directory with a `.eden/config.yaml`:
 ```yaml
 planner_root: "./planner"
 workspace: "./workspace"
-parallel_trials: 2
+parallel_trials: 3
 implement_command: "python3 implement.py"
 evaluate_command:  "python3 eval.py"
 plan_command:      "python3 plan.py"
@@ -66,22 +82,61 @@ outcomes to `results.db` — then notifies the planner to propose the next batch
 
 ## Directory layout
 
+After `eden init`, your experiment looks like:
+
 ```
-experiment/                  # experiment root
+my-experiment/
 ├── .eden/
 │   └── config.yaml
-├── eval.py                  # evaluation script (runs as root, reads committed result)
-├── implement.py             # implementer script (runs as trial-N user in worktree)
-└── planner/                 # planner root
-    ├── plan.py              # planner script (long-running, reads results, writes proposals)
-    └── workspace/           # the git repo trials branch from
+├── eval.py                  # evaluation script
+├── implement.py             # implementer script
+└── planner/
+    ├── plan.py              # planner script
+    ├── AGENTS.md            # planner agent guidance
+    ├── .agents/skills/      # planner skill docs
+    └── workspace/           # git repo trials branch from
 ```
+
+## Planner SDK
+
+Planner scripts import helpers from `eden.planner_kit`:
+
+```python
+from eden.planner_kit import PlannerContext, Proposal, run_planner
+```
+
+The SDK provides database access, artifact reading, notification parsing, and
+a convenience main loop. See the [data-fitting example](example/data-fitting/)
+for a complete planner using Claude CLI.
+
+A TypeScript SDK (`@direvo/planner-kit`) is planned for writing planners in
+TypeScript or other Node.js languages.
+
+## CLI commands
+
+| Command | Purpose |
+|---------|---------|
+| `eden init [directory]` | Scaffold a new experiment |
+| `eden run --config <path>` | Run an experiment |
+| `eden doctor --config <path>` | Validate experiment setup |
+| `eden docker build --config <path>` | Build Docker image |
+| `eden docker run --config <path>` | Build and run in Docker |
 
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — architecture deep-dive, data flow, isolation model
 - [docs/plans/v0.md](docs/plans/v0.md) — full configuration contract
+- [example/data-fitting/](example/data-fitting/) — complete working example
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development setup and workflow
+
+## Development
+
+```bash
+git clone <repo-url>
+cd eden
+uv sync --dev
+uv run -m pytest -q
+```
 
 ## License
 

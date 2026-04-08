@@ -166,6 +166,53 @@ def test_entrypoint_doctor_skips_runtime_setup(tmp_path: Path) -> None:
     assert not (workspace / "worktrees").exists()
 
 
+def test_entrypoint_doctor_recognizes_direvo_config_dir(tmp_path: Path) -> None:
+    """Entrypoint infers experiment root from .direvo/ the same as .eden/."""
+    entrypoint = Path(__file__).resolve().parents[1] / "docker" / "entrypoint.sh"
+    repo_root = Path(__file__).resolve().parents[1]
+    experiment_root = _init_workspace(tmp_path)
+
+    # Rename .eden to .direvo
+    eden_dir = experiment_root / ".eden"
+    direvo_dir = experiment_root / ".direvo"
+    eden_dir.rename(direvo_dir)
+
+    config_path = direvo_dir / "config.yaml"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            planner_root: "./planner"
+            workspace: "./workspace"
+            parallel_trials: 1
+            evaluate_command: "./evaluate.sh"
+            implement_command: "sh fake-execution.sh"
+            max_trials: 1
+            max_wall_time: "1h"
+            objective:
+              expr: "test_pass_rate"
+              direction: "maximize"
+            metrics_schema:
+              test_pass_rate: real
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root / "src")
+
+    result = subprocess.run(
+        ["sh", str(entrypoint), "doctor", "--config", str(config_path)],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0
+
+
 def test_entrypoint_run_requires_config() -> None:
     entrypoint = Path(__file__).resolve().parents[1] / "docker" / "entrypoint.sh"
 

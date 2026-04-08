@@ -13,6 +13,8 @@ This file provides guidance to AI agents working with this repository.
 | `uv run ruff check --fix .` | Lint and auto-fix |
 | `uv run pyright` | Static type checking |
 | `uv run eden doctor --config <path>` | Validate a workspace config |
+| `uv run eden docker build --config <path>` | Build Docker image from config |
+| `uv run eden docker run --config <path>` | Build and run experiment in Docker |
 | `./scripts/run_docker_integration.sh` | Docker smoke test |
 | `./scripts/run_privileged_validation.sh` | Root-only container validation |
 
@@ -71,8 +73,11 @@ The system runs inside Docker with multiple Linux users created at container sta
 eden/
 ├── src/eden/   # Core package
 │   ├── sql/            # SQL schema templates
-│   ├── cli.py          # CLI entry point
+│   ├── docker/         # Shipped Docker scripts (entrypoint, auth, export)
+│   ├── cli.py          # CLI entry point (run, doctor, docker build/run)
+│   ├── bootstrap.py    # Session bootstrap: config load, DB init, runtime setup
 │   ├── orchestrator.py # Async dispatch loop
+│   ├── docker_runner.py # Dockerfile generation, image build, container run
 │   ├── config.py       # YAML loading, scoped path resolution, validation
 │   ├── db.py           # SQLite manager for both databases
 │   ├── git_manager.py  # Worktree lifecycle, branch ops
@@ -86,7 +91,7 @@ eden/
 │   └── logging.py      # Logging configuration
 ├── tests/              # pytest suite, mirrors src modules
 │   └── fixtures/experiment/  # E2E test: seed-sum experiment
-├── docker/             # entrypoint.sh
+├── docker/             # Backward-compat entrypoint wrapper
 ├── scripts/            # Docker integration/validation scripts
 ├── docs/plans/         # Implementation plans
 └── docs/prds/          # Product requirement documents

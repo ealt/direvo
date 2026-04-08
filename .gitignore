@@ -6,4 +6,6 @@ __pycache__/
 *.pyc
 *.egg-info/
 docs/plans/review/
-eden-output-*/
+output/
+node_modules/
+packages/*/dist/

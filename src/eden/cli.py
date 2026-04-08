@@ -12,7 +12,9 @@ import sys
 from pathlib import Path
 
 from .config import ConfigError, load_config
+from .docker_runner import build_image, run_container
 from .git_manager import GitManager
+from .init import scaffold_experiment
 from .orchestrator import Orchestrator, bootstrap
 from .summary import print_summary
 
@@ -22,9 +24,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="eden")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    init_parser = subparsers.add_parser("init")
+    init_parser.add_argument("directory", nargs="?", default=".")
+    init_parser.add_argument("--force", action="store_true")
+
     for command in ("run", "doctor"):
         sub = subparsers.add_parser(command)
         sub.add_argument("--config", required=True)
+
+    docker_parser = subparsers.add_parser("docker")
+    docker_sub = docker_parser.add_subparsers(dest="docker_command")
+    for docker_cmd in ("build", "run"):
+        sub = docker_sub.add_parser(docker_cmd)
+        sub.add_argument("--config", required=True)
+        sub.add_argument("--tag", default=None)
+    docker_sub.choices["run"].add_argument("--output", default=None)
 
     return parser
 
@@ -35,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.command == "init":
+            scaffold_experiment(Path(args.directory), force=args.force)
+            return 0
         if args.command == "doctor":
             return doctor(Path(args.config))
         if args.command == "run":
@@ -43,10 +60,36 @@ def main(argv: list[str] | None = None) -> int:
             orchestrator.run()
             print_summary(orchestrator)
             return 0
+        if args.command == "docker":
+            return _docker_command(args)
     except (ConfigError, RuntimeError, sqlite3.Error) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 1
+
+
+def _docker_command(args: argparse.Namespace) -> int:
+    """Handle eden docker build/run commands."""
+    if not args.docker_command:
+        args.docker_command = "run"
+
+    config = load_config(Path(args.config))
+    if config.docker is None:
+        print("error: config has no docker section", file=sys.stderr)
+        return 1
+
+    if not shutil.which("docker"):
+        print("error: docker is not installed or not in PATH", file=sys.stderr)
+        return 1
+
+    tag = build_image(config, tag=args.tag)
+    print(f"Built image: {tag}")
+
+    if args.docker_command == "build":
+        return 0
+
+    output_dir = Path(args.output) if args.output else None
+    return run_container(config, tag=tag, output_dir=output_dir)
 
 
 def doctor(config_path: Path) -> int:

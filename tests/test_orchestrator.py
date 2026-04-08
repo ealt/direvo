@@ -331,7 +331,7 @@ def test_bootstrap_reapplies_runtime_setup_after_database_initialization(
         def prepare(self, config: object) -> None:
             prepare_calls.append(config.proposals_db)  # type: ignore[attr-defined]
 
-    monkeypatch.setattr("eden.orchestrator.RuntimeSetup", FakeRuntimeSetup)
+    monkeypatch.setattr("eden.bootstrap.RuntimeSetup", FakeRuntimeSetup)
 
     result = bootstrap(config_path, progress=False)
 
