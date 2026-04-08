@@ -15,12 +15,16 @@ This file provides guidance to AI agents working with this repository.
 | `uv run eden doctor --config <path>` | Validate a workspace config |
 | `uv run eden docker build --config <path>` | Build Docker image from config |
 | `uv run eden docker run --config <path>` | Build and run experiment in Docker |
+| `uv run eden ui --config <path>` | Start the Web UI for a live experiment |
+| `uv run eden ui --experiment-dir <path>` | Start the Web UI for an exported experiment |
+| `cd packages/web-ui && npm run build` | Build the Web UI frontend |
+| `cd packages/web-ui && npm test` | Run Web UI frontend tests |
 | `./scripts/run_docker_integration.sh` | Docker smoke test |
 | `./scripts/run_privileged_validation.sh` | Root-only container validation |
 
 ## Architecture Overview
 
-EDEN is an orchestration system that runs concurrent research trials inside a single Docker container. A **planner** proposes experiments via a shared SQLite database, and the **orchestrator** dispatches them as parallel git worktrees, each executed by an isolated Linux user.
+EDEN is an orchestration system that runs concurrent research trials inside a single Docker container. A **planner** proposes experiments via a shared SQLite database, and the **orchestrator** dispatches them as parallel git worktrees, each executed by an isolated Linux user. A **Web UI** provides browser-based observability into experiments, both during live runs and for post-hoc exploration of completed experiments.
 
 ### Experiment Root, Planner Root, And Workspace Root
 
@@ -58,6 +62,18 @@ Paths resolve by scope:
 - **results.db**: Orchestrator writes, planner reads. Uses SQLite `DELETE` journal mode and stores trial outcomes with user-defined metric columns from `metrics_schema`.
 - **proposals.db**: Planner writes, orchestrator reads/updates. Uses SQLite `WAL` journal mode and acts as the proposal queue. Proposals carry parent commits and a slug used for branch naming.
 
+### Web UI
+
+The Web UI (`eden ui`) provides browser-based experiment observability. It is a thin Python file server (Starlette) that serves experiment data files over HTTP, paired with a React SPA that queries SQLite databases directly in the browser using sql.js (SQLite compiled to WebAssembly).
+
+**Architecture**: The backend serves raw files — `results.db` is served as-is (DELETE journal mode), `proposals.db` is served as a WAL-checkpointed snapshot via `sqlite3.backup()`, and artifacts/logs are served via standard static file serving. The frontend downloads the database files and runs SQL queries in-browser, enabling a SQL Console for arbitrary exploration. Live updates use HEAD-based polling (every 3 seconds) to detect file changes.
+
+**Two modes**:
+- **Live** (`eden ui --config .eden/config.yaml`): reads from the experiment root alongside a running orchestrator
+- **Post-run** (`eden ui --experiment-dir /path/to/exported/`): reads from an exported experiment directory
+
+**Key files**: `src/eden/web/server.py` (Starlette app), `packages/web-ui/` (React frontend)
+
 ### Subprocess Isolation Model
 
 The system runs inside Docker with multiple Linux users created at container startup by `runtime.py`:
@@ -74,7 +90,8 @@ eden/
 ├── src/eden/   # Core package
 │   ├── sql/            # SQL schema templates
 │   ├── docker/         # Shipped Docker scripts (entrypoint, auth, export)
-│   ├── cli.py          # CLI entry point (run, doctor, docker build/run)
+│   ├── web/            # Web UI server (Starlette file server)
+│   ├── cli.py          # CLI entry point (run, doctor, docker build/run, ui)
 │   ├── bootstrap.py    # Session bootstrap: config load, DB init, runtime setup
 │   ├── orchestrator.py # Async dispatch loop
 │   ├── docker_runner.py # Dockerfile generation, image build, container run
@@ -91,6 +108,7 @@ eden/
 │   └── logging.py      # Logging configuration
 ├── tests/              # pytest suite, mirrors src modules
 │   └── fixtures/experiment/  # E2E test: seed-sum experiment
+├── packages/web-ui/    # React/Vite/TypeScript frontend SPA
 ├── docker/             # Backward-compat entrypoint wrapper
 ├── scripts/            # Docker integration/validation scripts
 ├── docs/plans/         # Implementation plans
@@ -125,6 +143,8 @@ experiment/              # experiment_root
 - The planner subprocess is long-lived and receives trial notifications via stdin, not polling.
 - Docker tests require privileged mode for user creation; use the scripts in `scripts/` rather than running Docker commands by hand.
 - The planner subprocess introduces timing non-determinism: a fast implementer can exhaust the proposal queue before the planner reacts to completion notifications. The orchestrator handles this via idle-polling, but tests must not assume deterministic proposal ordering when a subprocess planner is involved.
+- The Web UI cannot serve `proposals.db` as a raw file because it uses WAL journal mode — recent writes may live in the `-wal` sidecar, and sql.js (browser SQLite) has no WAL support. The backend serves a checkpointed snapshot via `sqlite3.backup()` instead. `results.db` uses DELETE mode and is served as-is.
+- The Web UI frontend requires building before `eden ui` can serve it: run `cd packages/web-ui && npm run build` first. Use `--dev` to proxy to the Vite dev server during frontend development.
 
 ## Coding Style
 

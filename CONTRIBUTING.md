@@ -8,6 +8,7 @@ Thank you for your interest in contributing to eden!
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - Docker (for integration tests)
 - Git
+- Node.js 18+ and npm (for Web UI development only)
 
 ## Setup
 
@@ -48,6 +49,21 @@ uv run -m pytest -q tests/test_orchestrator.py
 
 # Single test
 uv run -m pytest -q -k test_function_name
+```
+
+### Web UI Tests
+
+```bash
+# Build the frontend
+cd packages/web-ui
+npm install
+npm run build
+
+# Type check
+npm run lint
+
+# Run frontend tests
+npm test
 ```
 
 ### Docker Integration Tests

@@ -112,6 +112,34 @@ for a complete planner using Claude CLI.
 A TypeScript SDK (`@direvo/planner-kit`) is planned for writing planners in
 TypeScript or other Node.js languages.
 
+## Web UI
+
+EDEN includes a browser-based dashboard for observing experiments in real time or
+exploring completed runs:
+
+```bash
+# Install the web extras
+pip install 'direvo[web]'
+
+# Build the frontend (once)
+cd packages/web-ui && npm install && npm run build && cd ../..
+
+# View a live experiment
+eden ui --config .eden/config.yaml
+
+# View an exported experiment
+eden ui --experiment-dir ./direvo-output-20260401-143000/
+```
+
+The UI provides five views: **Metrics** (charts with convergence tracking),
+**Timeline** (per-slot trial status), **Artifacts** (markdown/JSON viewer),
+**Proposals** (queue table), and **Explorer** (SQL console, raw DB tables,
+session log, git DAG).
+
+The dashboard runs entirely in the browser — it downloads the SQLite databases
+and queries them locally using sql.js (SQLite compiled to WebAssembly), so there
+is no server-side query layer.
+
 ## CLI commands
 
 | Command | Purpose |
@@ -121,11 +149,14 @@ TypeScript or other Node.js languages.
 | `eden doctor --config <path>` | Validate experiment setup |
 | `eden docker build --config <path>` | Build Docker image |
 | `eden docker run --config <path>` | Build and run in Docker |
+| `eden ui --config <path>` | Open Web UI for a live experiment |
+| `eden ui --experiment-dir <path>` | Open Web UI for an exported experiment |
 
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — architecture deep-dive, data flow, isolation model
 - [docs/plans/v0.md](docs/plans/v0.md) — full configuration contract
+- [docs/plans/web-ui-observability.md](docs/plans/web-ui-observability.md) — Web UI design decisions
 - [example/data-fitting/](example/data-fitting/) — complete working example
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development setup and workflow
 
@@ -136,6 +167,13 @@ git clone <repo-url>
 cd eden
 uv sync --dev
 uv run -m pytest -q
+
+# Web UI development (optional)
+cd packages/web-ui
+npm install
+npm run dev          # Vite dev server on localhost:5173
+# In another terminal:
+uv run eden ui --config .eden/config.yaml --dev  # backend on localhost:8741
 ```
 
 ## License
