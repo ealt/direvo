@@ -1,0 +1,40 @@
+{
+  "name": "@direvo/planner-kit",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for writing EDEN planner scripts",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "sql"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "eden",
+    "direvo",
+    "directed-evolution",
+    "planner",
+    "orchestration"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

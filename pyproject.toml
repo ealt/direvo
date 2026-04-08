@@ -6,11 +6,27 @@ build-backend = "setuptools.build_meta"
 name = "direvo"
 version = "0.1.0"
 description = "EDEN orchestration engine for directed code evolution"
-readme = "docs/plans/v0.md"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
+keywords = ["directed-evolution", "orchestration", "ai", "research-automation"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Testing",
+]
 dependencies = [
   "PyYAML>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/direvo/eden"
+Repository = "https://github.com/direvo/eden"
+Issues = "https://github.com/direvo/eden/issues"
 
 [project.optional-dependencies]
 dev = [
