@@ -43,6 +43,20 @@ def test_loads_valid_config(tmp_path: Path) -> None:
     assert config.max_wall_time_seconds == 86400
 
 
+def test_infers_experiment_root_from_direvo_directory(tmp_path: Path) -> None:
+    direvo_dir = tmp_path / ".direvo"
+    direvo_dir.mkdir()
+    config_path = direvo_dir / "config.yaml"
+    eval_py = tmp_path / "eval.py"
+    eval_py.write_text("print('ok')\n", encoding="utf-8")
+    config_path.write_text(_base_config(), encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.experiment_root == tmp_path
+    assert config.planner_root == tmp_path / "planner"
+
+
 def test_rejects_invalid_metric_identifier(tmp_path: Path) -> None:
     eden_dir = tmp_path / ".eden"
     eden_dir.mkdir()

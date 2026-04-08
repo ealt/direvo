@@ -130,12 +130,12 @@ def _find_eden_source_tree() -> Path:
     while current != current.parent:
         if (current / "pyproject.toml").exists():
             toml_text = (current / "pyproject.toml").read_text(encoding="utf-8")
-            if 'name = "eden"' in toml_text:
+            if 'name = "eden"' in toml_text or 'name = "direvo"' in toml_text:
                 return current
         current = current.parent
     raise RuntimeError(
         "eden docker requires a source checkout. "
-        "Could not locate pyproject.toml with the eden package. "
+        "Could not locate pyproject.toml with the eden/direvo package. "
         "A pip-installable package is not yet available."
     )
 

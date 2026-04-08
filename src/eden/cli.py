@@ -14,6 +14,7 @@ from pathlib import Path
 from .config import ConfigError, load_config
 from .docker_runner import build_image, run_container
 from .git_manager import GitManager
+from .init import scaffold_experiment
 from .orchestrator import Orchestrator, bootstrap
 from .summary import print_summary
 
@@ -22,6 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(prog="eden")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    init_parser = subparsers.add_parser("init")
+    init_parser.add_argument("directory", nargs="?", default=".")
+    init_parser.add_argument("--force", action="store_true")
 
     for command in ("run", "doctor"):
         sub = subparsers.add_parser(command)
@@ -44,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.command == "init":
+            scaffold_experiment(Path(args.directory), force=args.force)
+            return 0
         if args.command == "doctor":
             return doctor(Path(args.config))
         if args.command == "run":

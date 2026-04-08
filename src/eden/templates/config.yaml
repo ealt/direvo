@@ -1,0 +1,42 @@
+# EDEN experiment configuration
+# See docs/plans/v0.md for the full configuration contract.
+
+planner_root: "./planner"
+workspace: "./workspace"
+parallel_trials: 3
+
+# TODO: Replace with your evaluation and implementation commands.
+evaluate_command: "python3 eval.py"
+implement_command: "echo 'TODO: replace with your implement command'"
+
+# TODO: Replace with your planner command, or remove to run without a planner.
+# plan_command: "python3 plan.py"
+
+max_trials: 10
+max_wall_time: "30m"
+implement_timeout_sec: 600
+evaluation_timeout_sec: 60
+
+# TODO: Define your experiment's metric columns and objective.
+metrics_schema:
+  score: real
+
+objective:
+  expr: "score"
+  direction: "maximize"
+
+# Uncomment to grant implementers read access to specific files:
+# file_permissions:
+#   - path: "data.csv"
+#     grant: "implementer"
+
+# Uncomment and configure for Docker execution:
+# docker:
+#   tools:
+#     - claude
+#   dependencies: []
+#   pip_dependencies: []
+#   setup_command: "echo 'setup done'"
+#   git_config:
+#     user_name: "eden"
+#     user_email: "eden@experiment"

@@ -142,7 +142,7 @@ def load_config(config_path: str | Path) -> SessionConfig:
 
 def _infer_experiment_root(config_path: Path) -> Path:
     """Infer the experiment root from the config path."""
-    if config_path.parent.name == ".eden":
+    if config_path.parent.name in (".eden", ".direvo"):
         return config_path.parent.parent
     return config_path.parent
 

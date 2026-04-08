@@ -59,7 +59,7 @@ case "$command_name" in
         # Determine experiment root from config path.
         config_dir=$(dirname "$config_path")
         config_dirname=$(basename "$config_dir")
-        if [ "$config_dirname" = ".eden" ]; then
+        if [ "$config_dirname" = ".eden" ] || [ "$config_dirname" = ".direvo" ]; then
             experiment_root=$(dirname "$config_dir")
         else
             experiment_root="$config_dir"
