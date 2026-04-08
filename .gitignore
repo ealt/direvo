@@ -6,4 +6,4 @@ __pycache__/
 *.pyc
 *.egg-info/
 docs/plans/review/
-eden-output-*/
+output/

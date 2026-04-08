@@ -9,16 +9,22 @@ Unix user isolation.
 
 ```bash
 # From the repo root:
-eden docker run --config example/data-fitting/.eden/config.yaml --output ./output
+uv sync --dev
+uv run eden docker run --config example/data-fitting/.eden/config.yaml --output ./output
 ```
 
-That's it. The `eden docker` command reads the config's `docker:` section,
-generates a Dockerfile (installs eden + both CLIs, initializes the workspace
-git repo, copies the experiment), builds the image, and runs it with
-`--privileged` for user isolation.
+The `eden` CLI is a Python entry point installed in the virtualenv. Use
+`uv run eden` to invoke it (or activate the venv first with `source .venv/bin/activate`,
+then call `eden` directly).
+
+The `eden docker` command reads the config's `docker:` section, generates a
+Dockerfile (installs eden + both CLIs, initializes the workspace git repo,
+copies the experiment), builds the image, and runs it with `--privileged` for
+user isolation.
 
 ## Prerequisites
 
+- [uv](https://docs.astral.sh/uv/) (or pip — `pip install -e .` also works)
 - Docker
 - Claude CLI logged in (`claude auth login`)
 - Codex CLI logged in (`codex auth login`)
@@ -81,13 +87,21 @@ Mounted paths (when they exist on the host):
 ## Directory Structure
 
 ```
-.eden/config.yaml        Config: 3 parallel trials, 15 max, R² + RMSE metrics
+.eden/config.yaml          Config: 3 parallel trials, 15 max, R² + RMSE metrics
 eval.py                    Evaluator: scores on hidden test set, writes report
 generate_data.py           Regenerate train/test data (deterministic, seed=42)
 train.npz                  Training data (granted to implementer)
 test.npz                   Test data (hidden from planner and implementer)
 planner/                   Planner scope
   plan.py                  Persistent subprocess, single Claude session
+  planner-prompt.md        Experiment-specific strategy role for Claude
+  AGENTS.md                EDEN framework reference for the planner agent
+  .agents/skills/          Reusable skill docs for planner agent operations
+    read-trial-artifacts.md
+    query-trial-results.md
+    query-proposals.md
+    write-proposal.md
+    navigate-workspace.md
   workspace/               Git repo (initialized in Docker, not on host)
     model.py               Baseline model (predict-the-mean)
     AGENTS.md              Interface contract for the implementer
