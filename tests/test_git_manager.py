@@ -92,3 +92,46 @@ def test_merge_no_commit_allows_conflict_state(tmp_path: Path) -> None:
 
     status = git.status_porcelain(worktree_path)
     assert "UU tracked.txt" in status
+
+
+def test_remove_all_eden_worktrees_removes_registered_worktrees(tmp_path: Path) -> None:
+    git = _init_repo(tmp_path)
+    wt0 = git.ensure_worktree(0)
+    wt1 = git.ensure_worktree(1)
+    assert wt0.is_dir()
+    assert wt1.is_dir()
+
+    assert git.remove_all_eden_worktrees() == 2
+    assert not wt0.exists()
+    assert not wt1.exists()
+
+
+def test_remove_all_eden_worktrees_removes_orphan_wt_directory(tmp_path: Path) -> None:
+    git = _init_repo(tmp_path)
+    orphan = tmp_path / "worktrees" / "wt-orphan"
+    orphan.mkdir(parents=True)
+    (orphan / "stale.txt").write_text("x", encoding="utf-8")
+
+    assert git.remove_all_eden_worktrees() == 1
+    assert not orphan.exists()
+
+
+def test_delete_local_branches_matching(tmp_path: Path) -> None:
+    git = _init_repo(tmp_path)
+    head = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    git.create_branch("trial/9-demo", head)
+
+    deleted = git.delete_local_branches_matching("refs/heads/trial/*")
+    assert deleted == ["trial/9-demo"]
+    list_result = subprocess.run(
+        ["git", "-C", str(tmp_path), "branch", "--list", "trial/*"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert list_result.stdout.strip() == ""

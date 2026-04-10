@@ -13,6 +13,7 @@ This file provides guidance to AI agents working with this repository.
 | `uv run ruff check --fix .` | Lint and auto-fix |
 | `uv run pyright` | Static type checking |
 | `uv run eden doctor --config <path>` | Validate a workspace config |
+| `uv run eden cleanup --config <path>` | Hard reset experiment state: worktrees, `trial/*` branches, SQLite DBs and journals, `session.log`, proposals and artifact trees, planner `.eden` symlinks |
 | `uv run eden docker build --config <path>` | Build Docker image from config |
 | `uv run eden docker run --config <path>` | Build and run experiment in Docker |
 | `uv run eden ui --config <path>` | Start the Web UI for a live experiment |

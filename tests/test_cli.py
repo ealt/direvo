@@ -5,7 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from eden.cli import doctor, main
+from eden.cli import cleanup_command, doctor, main
+from eden.config import load_config
+from eden.db import DatabaseManager
+from eden.git_manager import GitManager
 
 
 def _run(command: list[str], cwd: Path) -> None:
@@ -191,3 +194,106 @@ def test_docker_rejects_missing_docker_binary(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("shutil.which", lambda cmd: None)
 
     assert main(["docker", "build", "--config", "c.yaml"]) == 1
+
+
+def test_cleanup_removes_worktrees(experiment: tuple[Path, Path]) -> None:
+    experiment_root, workspace = experiment
+    config_path = _write_config(experiment_root)
+    git = GitManager(workspace)
+    wt = git.ensure_worktree(0)
+    assert wt.is_dir()
+
+    assert cleanup_command(config_path) == 0
+    assert not wt.exists()
+
+
+def test_cleanup_hard_reset_clears_experiment_outputs(experiment: tuple[Path, Path]) -> None:
+    experiment_root, workspace = experiment
+    config_path = _write_config(experiment_root)
+    config = load_config(config_path)
+    (config.experiment_root / ".eden").mkdir(parents=True, exist_ok=True)
+    (config.planner_root / ".eden").mkdir(parents=True, exist_ok=True)
+    database_manager = DatabaseManager(
+        results_db=config.results_db,
+        proposals_db=config.proposals_db,
+        metrics_schema=config.metrics_schema,
+        busy_timeout_ms=config.sqlite_busy_timeout_ms,
+    )
+    database_manager.initialize()
+
+    planner_eden = config.planner_root / ".eden"
+    (planner_eden / "results.db").symlink_to(config.results_db.resolve())
+    (planner_eden / "artifacts").symlink_to(config.artifacts_dir.resolve())
+
+    (config.artifacts_dir / "trial-1").mkdir(parents=True)
+    (config.artifacts_dir / "trial-1" / "plan.md").write_text("p", encoding="utf-8")
+    proposal_dir = config.proposals_dir / "proposal-a"
+    proposal_dir.mkdir(parents=True)
+    (proposal_dir / "plan.md").write_text("q", encoding="utf-8")
+    (config.experiment_root / ".eden" / "session.log").write_text("log line\n", encoding="utf-8")
+
+    git = GitManager(workspace)
+    head = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    git.create_branch("trial/1-smoke", head)
+    git.ensure_worktree(0)
+
+    assert cleanup_command(config_path) == 0
+
+    assert not config.results_db.exists()
+    assert not config.proposals_db.exists()
+    assert (config.experiment_root / ".eden" / "session.log").read_text(encoding="utf-8") == ""
+    assert not (planner_eden / "results.db").exists()
+    assert not (planner_eden / "artifacts").exists()
+    assert not (config.artifacts_dir / "trial-1").exists()
+    assert not proposal_dir.exists()
+    assert (config.experiment_root / ".eden" / "config.yaml").exists()
+
+    branches = subprocess.run(
+        ["git", "-C", str(workspace), "branch", "--list", "trial/*"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert branches == ""
+
+
+def test_cleanup_then_database_initialize_succeeds(experiment: tuple[Path, Path]) -> None:
+    experiment_root, workspace = experiment
+    config_path = _write_config(experiment_root)
+    config = load_config(config_path)
+    (config.experiment_root / ".eden").mkdir(parents=True, exist_ok=True)
+    (config.planner_root / ".eden").mkdir(parents=True, exist_ok=True)
+    database_manager = DatabaseManager(
+        results_db=config.results_db,
+        proposals_db=config.proposals_db,
+        metrics_schema=config.metrics_schema,
+        busy_timeout_ms=config.sqlite_busy_timeout_ms,
+    )
+    database_manager.initialize()
+    cleanup_command(config_path)
+    database_manager.initialize()
+    assert config.results_db.is_file()
+    assert config.proposals_db.is_file()
+
+
+def test_main_cleanup_invokes_cleanup_command(
+    monkeypatch: pytest.MonkeyPatch, experiment: tuple[Path, Path]
+) -> None:
+    experiment_root, workspace = experiment
+    config_path = _write_config(experiment_root)
+    GitManager(workspace).ensure_worktree(0)
+
+    calls: list[Path] = []
+
+    def fake_cleanup_command(path: Path) -> int:
+        calls.append(path)
+        return 0
+
+    monkeypatch.setattr("eden.cli.cleanup_command", fake_cleanup_command)
+    assert main(["cleanup", "--config", str(config_path)]) == 0
+    assert calls == [Path(str(config_path))]

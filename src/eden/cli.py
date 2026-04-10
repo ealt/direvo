@@ -11,6 +11,7 @@ import stat
 import sys
 from pathlib import Path
 
+from .cleanup import hard_reset_experiment_state
 from .config import ConfigError, load_config
 from .docker_runner import build_image, run_container
 from .git_manager import GitManager
@@ -31,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     for command in ("run", "doctor"):
         sub = subparsers.add_parser(command)
         sub.add_argument("--config", required=True)
+
+    cleanup_parser = subparsers.add_parser(
+        "cleanup",
+        help="Hard reset experiment state (worktrees, DBs, logs, proposals, artifacts, trial/* branches)",
+    )
+    cleanup_parser.add_argument("--config", required=True)
 
     docker_parser = subparsers.add_parser("docker")
     docker_sub = docker_parser.add_subparsers(dest="docker_command")
@@ -62,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "doctor":
             return doctor(Path(args.config))
+        if args.command == "cleanup":
+            return cleanup_command(Path(args.config))
         if args.command == "run":
             result = bootstrap(Path(args.config))
             orchestrator = Orchestrator(result.config, result.database_manager, result.logger)
@@ -144,6 +153,30 @@ def _ui_command(args: argparse.Namespace) -> int:
         threading.Timer(1.0, webbrowser.open, args=[f"http://localhost:{port}"]).start()
 
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    return 0
+
+
+def cleanup_command(config_path: Path) -> int:
+    """Hard reset experiment state to match a fresh tree before ``eden run``."""
+    config = load_config(config_path)
+    if not GitManager(config.workspace_root).is_git_repo():
+        raise RuntimeError(f"Workspace is not a git repo: {config.workspace_root}")
+
+    result = hard_reset_experiment_state(config)
+    print(f"Removed {result.worktrees_removed} worktree directory(ies) under workspace/worktrees/.")
+    if result.branches_deleted:
+        print("Deleted local branches:\n  " + "\n  ".join(result.branches_deleted))
+    else:
+        print("No trial/* branches to delete.")
+    print(f"Removed {result.sqlite_files_removed} SQLite file(s) (databases and journals).")
+    if result.session_log_cleared:
+        print("Cleared session.log.")
+    else:
+        print("session.log was already absent; nothing to clear.")
+    print(f"Removed {result.proposal_items_removed} item(s) from the proposals directory.")
+    print(f"Removed {result.artifact_items_removed} item(s) from the artifacts directory.")
+    print(f"Removed {result.planner_symlinks_removed} planner .eden symlink(s) (results.db / artifacts).")
+    print(f"Removed {result.grants_removed} planner grant symlink(s).")
     return 0
 
 

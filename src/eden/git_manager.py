@@ -68,6 +68,35 @@ class GitManager:
         result = self._run_git(["cat-file", "-t", sha], check=False)
         return result.returncode == 0 and result.stdout.strip() == "commit"
 
+    def remove_all_eden_worktrees(self) -> int:
+        """Remove every ``worktrees/wt-*`` directory (registered or orphaned)."""
+        worktrees_dir = self.workspace_root / "worktrees"
+        if not worktrees_dir.is_dir():
+            return 0
+        self.prune_worktrees()
+        removed = 0
+        for path in sorted(worktrees_dir.glob("wt-*")):
+            if not path.is_dir():
+                continue
+            resolved = path.resolve()
+            result = self._run_git(["worktree", "remove", "--force", str(resolved)], check=False)
+            if result.returncode != 0:
+                shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+        self.prune_worktrees()
+        return removed
+
+    def delete_local_branches_matching(self, ref_pattern: str) -> list[str]:
+        """Delete local branches whose full ref matches ``git for-each-ref`` pattern."""
+        result = self._run_git(["for-each-ref", ref_pattern, "--format=%(refname:short)"])
+        names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        deleted: list[str] = []
+        for name in names:
+            branch_result = self._run_git(["branch", "-D", name], check=False)
+            if branch_result.returncode == 0:
+                deleted.append(name)
+        return deleted
+
     def create_branch(self, branch_name: str, parent_sha: str) -> None:
         """Create a new branch from a parent commit."""
         self._run_git(["branch", branch_name, parent_sha])
