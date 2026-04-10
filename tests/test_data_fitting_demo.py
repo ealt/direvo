@@ -187,7 +187,7 @@ class TestDataFittingPlanner:
         all_trials = [trial]
 
         # Import the planner module and patch its session + ctx methods
-        sys.path.insert(0, str(DEMO_DIR / "planner"))
+        sys.path.insert(0, str(DEMO_DIR))
         try:
             import importlib
 

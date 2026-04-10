@@ -90,8 +90,8 @@ my-experiment/
 │   └── config.yaml
 ├── eval.py                  # evaluation script
 ├── implement.py             # implementer script
+├── plan.py                  # planner subprocess script
 └── planner/
-    ├── plan.py              # planner script
     ├── AGENTS.md            # planner agent guidance
     ├── .agents/skills/      # planner skill docs
     └── workspace/           # git repo trials branch from

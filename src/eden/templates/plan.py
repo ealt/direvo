@@ -1,7 +1,8 @@
 """Stub planner for an EDEN experiment.
 
-Uses the run_planner() convenience loop from eden.planner_kit.
-Replace the callback implementations with your own logic.
+Lives at the experiment root (orchestrator-owned, like eval.py). Uses the
+run_planner() convenience loop from eden.planner_kit. Replace the callback
+implementations with your own logic.
 """
 
 from __future__ import annotations

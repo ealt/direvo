@@ -123,8 +123,8 @@ experiment/              # experiment_root
 │   └── config.yaml
 ├── eval.py              # evaluation script (experiment-scoped)
 ├── implement.py         # implementer entry script (experiment-scoped)
+├── plan.py              # persistent planner subprocess (experiment-scoped)
 └── planner/             # planner_root
-    ├── plan.py          # planner script
     └── workspace/       # workspace_root (git repo)
         └── seeds.md     # trial data
 ```

@@ -115,11 +115,11 @@ Mounted paths (when they exist on the host):
 ```
 .eden/config.yaml          Config: 3 parallel trials, 15 max, R² + RMSE metrics
 eval.py                    Evaluator: scores on hidden test set, writes report
+plan.py                    Persistent planner subprocess (granted to planner user in Docker)
 generate_data.py           Regenerate train/test data (deterministic, seed=42)
 train.npz                  Training data (granted to implementer)
 test.npz                   Test data (hidden from planner and implementer)
-planner/                   Planner scope
-  plan.py                  Persistent subprocess, single Claude session
+planner/                   Planner scope (proposals DB, workspace)
   planner-prompt.md        Experiment-specific strategy role for Claude
   AGENTS.md                EDEN framework reference for the planner agent
   .agents/skills/          Reusable skill docs for planner agent operations

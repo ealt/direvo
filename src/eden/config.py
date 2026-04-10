@@ -117,7 +117,7 @@ def load_config(config_path: str | Path) -> SessionConfig:
             _validate_implement_command(raw.get("implement_command")),
         ),
         plan_command=_resolve_command_optional(
-            planner_root, _optional_str(raw, "plan_command")
+            experiment_root, _optional_str(raw, "plan_command")
         ),
         file_permissions=file_permissions,
         plan_notify_template=plan_notify_template,

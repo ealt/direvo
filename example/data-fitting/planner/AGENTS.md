@@ -12,6 +12,10 @@ below describes the environment so you can understand the context behind the
 data you receive and, if you have tool access, interact with the environment
 directly.
 
+The orchestrator starts the persistent planner from `plan.py` at the **experiment
+root** (parent of this directory), same scope as `eval.py`. Process `cwd` remains
+this planner directory.
+
 ## Directory Layout
 
 Your working directory contains:

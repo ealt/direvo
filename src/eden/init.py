@@ -91,7 +91,7 @@ def _print_summary(target: Path) -> None:
     print("  .eden/config.yaml    -- experiment configuration")
     print("  eval.py              -- evaluator stub")
     print("  implement.py         -- implementer stub")
-    print("  planner/plan.py      -- planner stub")
+    print("  plan.py              -- planner subprocess stub")
     print("  planner/AGENTS.md    -- planner agent guidance")
     print("  planner/.agents/     -- planner skills")
     print("  planner/workspace/   -- git repo (initialized)")

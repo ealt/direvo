@@ -1,9 +1,9 @@
 """Planner for the seed-sum experiment.
 
-A persistent subprocess that proposes seeds to append to the workspace.
-On startup, creates an initial batch of proposals. Then listens on stdin
-for trial completion notifications and creates one follow-up proposal per
-completed trial, building on that trial's checkpoint.
+Lives at the experiment root. A persistent subprocess that proposes seeds to
+append to the workspace. On startup, creates an initial batch of proposals.
+Then listens on stdin for trial completion notifications and creates one
+follow-up proposal per completed trial, building on that trial's checkpoint.
 
 Seed selection: seeds are assigned sequentially (0, 1, 2, ...) and never
 repeated. Priority for initial proposals equals the seed value. Priority

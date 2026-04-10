@@ -14,7 +14,7 @@ def test_scaffold_creates_expected_files(tmp_path: Path) -> None:
     assert (target / ".eden" / "config.yaml").exists()
     assert (target / "eval.py").exists()
     assert (target / "implement.py").exists()
-    assert (target / "planner" / "plan.py").exists()
+    assert (target / "plan.py").exists()
     assert (target / "planner" / "AGENTS.md").exists()
     assert (target / "planner" / ".agents" / "skills" / "write-proposal.md").exists()
     assert (target / "planner" / ".agents" / "skills" / "query-trial-results.md").exists()
