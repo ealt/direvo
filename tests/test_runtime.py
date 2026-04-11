@@ -253,6 +253,102 @@ def test_runtime_setup_skips_broken_codex_symlinks_from_auth_mount(
     assert not (runtime_root / "trial-0" / "home" / ".codex" / "AGENTS.md").exists()
 
 
+def test_runtime_setup_seeds_claude_auth_from_auth_mount(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = load_config(_write_config(tmp_path))
+    config.workspace_root.mkdir(parents=True, exist_ok=True)
+
+    runtime_root = tmp_path / "runtime"
+    auth_home = tmp_path / "auth-home"
+
+    # HOME-relative auth dirs.
+    (auth_home / ".claude").mkdir(parents=True)
+    (auth_home / ".claude" / "credentials.json").write_text('{"token":"abc"}', encoding="utf-8")
+    (auth_home / ".config" / "claude").mkdir(parents=True)
+    (auth_home / ".config" / "claude" / "settings.json").write_text('{"k":"v"}', encoding="utf-8")
+
+    # XDG-relative auth dirs.
+    (auth_home / ".local" / "state" / "claude").mkdir(parents=True)
+    (auth_home / ".local" / "state" / "claude" / "state.json").write_text("{}", encoding="utf-8")
+
+    # Legacy single file.
+    (auth_home / ".claude.json").write_text('{"legacy":true}', encoding="utf-8")
+
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", str(runtime_root))
+    monkeypatch.setenv("EDEN_AUTH_HOME", str(auth_home))
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr("shutil.chown", lambda *args, **kwargs: None)
+
+    RuntimeSetup(FakeRunner()).prepare(config)
+
+    trial_root = runtime_root / "trial-0"
+
+    # HOME-relative copies.
+    cred = trial_root / "home" / ".claude" / "credentials.json"
+    assert cred.exists()
+    assert cred.read_text(encoding="utf-8") == '{"token":"abc"}'
+
+    cfg = trial_root / "home" / ".config" / "claude" / "settings.json"
+    assert cfg.exists()
+    assert cfg.read_text(encoding="utf-8") == '{"k":"v"}'
+
+    # XDG-relative copy (state → overridden XDG_STATE_HOME).
+    state = trial_root / "state" / "claude" / "state.json"
+    assert state.exists()
+
+    # Legacy file.
+    legacy = trial_root / "home" / ".claude.json"
+    assert legacy.exists()
+    assert legacy.read_text(encoding="utf-8") == '{"legacy":true}'
+
+
+def test_runtime_setup_skips_missing_claude_auth_dirs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = load_config(_write_config(tmp_path))
+    config.workspace_root.mkdir(parents=True, exist_ok=True)
+
+    runtime_root = tmp_path / "runtime"
+    auth_home = tmp_path / "auth-home"
+    auth_home.mkdir(parents=True)
+    # No Claude auth dirs created — should not error.
+
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", str(runtime_root))
+    monkeypatch.setenv("EDEN_AUTH_HOME", str(auth_home))
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr("shutil.chown", lambda *args, **kwargs: None)
+
+    RuntimeSetup(FakeRunner()).prepare(config)
+
+    assert not (runtime_root / "trial-0" / "home" / ".claude").exists()
+    assert not (runtime_root / "trial-0" / "home" / ".claude.json").exists()
+
+
+def test_runtime_setup_skips_broken_claude_symlinks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = load_config(_write_config(tmp_path))
+    config.workspace_root.mkdir(parents=True, exist_ok=True)
+
+    runtime_root = tmp_path / "runtime"
+    auth_home = tmp_path / "auth-home"
+    claude_dir = auth_home / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "credentials.json").write_text('{"ok":true}', encoding="utf-8")
+    (claude_dir / "broken-link").symlink_to(claude_dir / "nonexistent")
+
+    monkeypatch.setenv("EDEN_RUNTIME_DIR", str(runtime_root))
+    monkeypatch.setenv("EDEN_AUTH_HOME", str(auth_home))
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr("shutil.chown", lambda *args, **kwargs: None)
+
+    RuntimeSetup(FakeRunner()).prepare(config)
+
+    assert (runtime_root / "trial-0" / "home" / ".claude" / "credentials.json").exists()
+    assert not (runtime_root / "trial-0" / "home" / ".claude" / "broken-link").exists()
+
+
 def test_runtime_setup_restores_existing_worktree_git_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

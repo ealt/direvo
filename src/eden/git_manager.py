@@ -63,6 +63,11 @@ class GitManager:
             return
         self._run_git(["worktree", "remove", "--force", str(worktree_path)])
 
+    def commit_exists(self, sha: str) -> bool:
+        """Return whether a commit object exists in the repository."""
+        result = self._run_git(["cat-file", "-t", sha], check=False)
+        return result.returncode == 0 and result.stdout.strip() == "commit"
+
     def create_branch(self, branch_name: str, parent_sha: str) -> None:
         """Create a new branch from a parent commit."""
         self._run_git(["branch", branch_name, parent_sha])

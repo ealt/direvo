@@ -137,6 +137,15 @@ class RuntimeSetup:
             directory_mode=0o700,
             file_mode=0o600,
         )
+        self._seed_claude_auth(user_root)
+        for claude_dir in self._claude_auth_destinations(user_root):
+            self._apply_tree_permissions(
+                claude_dir,
+                user=username,
+                group=username,
+                directory_mode=0o700,
+                file_mode=0o600,
+            )
 
     def _seed_codex_home(self, destination: Path) -> None:
         """Populate a writable Codex home from the mounted auth directory when available."""
@@ -146,6 +155,57 @@ class RuntimeSetup:
         source = Path(auth_home) / ".codex"
         if not source.exists() or not source.is_dir():
             return
+        self._copy_auth_tree(source, destination)
+
+    def _seed_claude_auth(self, user_root: Path) -> None:
+        """Populate writable Claude CLI auth directories from the mounted auth home."""
+        auth_home = os.environ.get("EDEN_AUTH_HOME")
+        if not auth_home:
+            return
+        auth_base = Path(auth_home)
+
+        # HOME-relative paths: destination is under user_root/home.
+        home_mappings = [
+            (".claude", "home/.claude"),
+            (".config/claude", "home/.config/claude"),
+        ]
+        # XDG-relative paths: destination mirrors the overridden XDG dirs.
+        xdg_mappings = [
+            (".local/state/claude", "state/claude"),
+            (".local/share/claude", "share/claude"),
+            (".cache/claude", "cache/claude"),
+        ]
+        for src_rel, dst_rel in home_mappings + xdg_mappings:
+            source = auth_base / src_rel
+            if not source.is_dir():
+                continue
+            destination = user_root / dst_rel
+            destination.mkdir(parents=True, exist_ok=True)
+            self._copy_auth_tree(source, destination)
+
+        # Single-file: .claude.json (legacy config).
+        claude_json = auth_base / ".claude.json"
+        if claude_json.is_file():
+            target = user_root / "home" / ".claude.json"
+            try:
+                shutil.copy2(claude_json, target)
+            except FileNotFoundError:
+                pass
+
+    @staticmethod
+    def _claude_auth_destinations(user_root: Path) -> list[Path]:
+        """Return Claude auth directories under a user runtime root for permission fixup."""
+        candidates = [
+            user_root / "home" / ".claude",
+            user_root / "home" / ".config" / "claude",
+            user_root / "state" / "claude",
+            user_root / "share" / "claude",
+            user_root / "cache" / "claude",
+        ]
+        return [p for p in candidates if p.exists()]
+
+    def _copy_auth_tree(self, source: Path, destination: Path) -> None:
+        """Copy directory contents, skipping broken symlinks and transient dirs."""
         for item in source.iterdir():
             if item.name == "tmp":
                 continue
@@ -154,7 +214,7 @@ class RuntimeSetup:
                 if item.is_symlink() and not item.exists():
                     continue
                 if item.is_dir():
-                    shutil.copytree(item, target, dirs_exist_ok=True)
+                    shutil.copytree(item, target, dirs_exist_ok=True, ignore_dangling_symlinks=True)
                 else:
                     shutil.copy2(item, target)
             except FileNotFoundError:

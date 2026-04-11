@@ -165,7 +165,7 @@ is no server-side query layer.
 ```bash
 git clone <repo-url>
 cd eden
-uv sync --dev
+uv sync --extra dev
 uv run -m pytest -q
 
 # Web UI development (optional)

@@ -219,6 +219,10 @@ class Orchestrator:
         if not all(isinstance(commit, str) and commit.strip() for commit in parent_commits):
             raise RuntimeError("parent_commits entries must be non-empty strings")
 
+        for commit in parent_commits:
+            if not self.git_manager.commit_exists(commit.strip()):
+                raise RuntimeError(f"parent commit not found in workspace: {commit.strip()[:12]}")
+
         proposal_docs_path = self._resolve_proposal_docs_path(proposal.artifacts_uri)
         if not proposal_docs_path.exists():
             raise RuntimeError(f"proposal docs not found: {proposal_docs_path}")

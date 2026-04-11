@@ -188,9 +188,13 @@ def build_image(config: SessionConfig, *, tag: str | None = None) -> str:
             if src.exists():
                 shutil.copy2(src, eden_src / filename)
 
-        # Copy experiment directory.
+        # Copy experiment directory and remove stale runtime state that bootstrap
+        # recreates at container startup.  Without this, databases from previous
+        # local runs leak into the image with commit SHAs that may not exist in
+        # the container's workspace, causing "not a valid branch point" errors.
         experiment_dest = context / "experiment"
         shutil.copytree(config.experiment_root, experiment_dest, dirs_exist_ok=True)
+        _clean_docker_context(experiment_dest, config)
 
         # Extract shipped scripts.
         _extract_shipped_scripts(context / "scripts")
@@ -202,6 +206,41 @@ def build_image(config: SessionConfig, *, tag: str | None = None) -> str:
         )
 
     return tag
+
+
+def _clean_docker_context(experiment_dest: Path, config: SessionConfig) -> None:
+    """Remove stale runtime state from the copied experiment directory.
+
+    Bootstrap recreates databases, symlinks, worktrees, and logs at container
+    startup.  Leftover files from a previous local run cause failures: stale
+    proposals reference commit SHAs that don't exist in the container's git
+    repo, flattened symlinks block ``_ensure_symlink``, and orphaned worktrees
+    confuse git.
+    """
+    planner_rel = config.planner_root.relative_to(config.experiment_root)
+    workspace_rel = planner_rel / config.workspace_root.relative_to(config.planner_root)
+
+    # Paths under the experiment .eden/ that bootstrap recreates.
+    for name in ("results.db", "results.db-journal", "session.log"):
+        target = experiment_dest / ".eden" / name
+        if target.exists():
+            target.unlink()
+    artifacts = experiment_dest / ".eden" / "artifacts"
+    if artifacts.is_dir() and not artifacts.is_symlink():
+        shutil.rmtree(artifacts)
+
+    # Planner .eden/: proposals database, flattened bootstrap symlinks.
+    planner_eden = experiment_dest / planner_rel / ".eden"
+    if planner_eden.is_dir():
+        shutil.rmtree(planner_eden)
+
+    # Workspace: stale worktrees and trial state.
+    worktrees = experiment_dest / workspace_rel / "worktrees"
+    if worktrees.is_dir():
+        shutil.rmtree(worktrees)
+    ws_eden = experiment_dest / workspace_rel / ".eden"
+    if ws_eden.is_dir():
+        shutil.rmtree(ws_eden)
 
 
 def detect_auth_mounts() -> list[tuple[str, str]]:

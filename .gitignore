@@ -3,9 +3,14 @@ __pycache__/
 .coverage
 .pytest_cache/
 .venv/
+*.db
+*.log
 *.pyc
+**/.eden/artifacts
+**/.eden/artifacts/*
+**/.eden/proposals/
 *.egg-info/
 docs/plans/review/
-output/
+*output*/
 node_modules/
 packages/*/dist/

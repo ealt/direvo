@@ -20,7 +20,7 @@ Thank you for your interest in contributing to eden!
 
 2. Install dependencies:
    ```bash
-   uv sync --dev
+   uv sync --extra dev
    ```
 
 3. Verify the setup:

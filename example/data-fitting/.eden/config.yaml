@@ -2,7 +2,11 @@ planner_root: "./planner"
 workspace: "./workspace"
 parallel_trials: 3
 evaluate_command: "python3 eval.py"
-implement_command: "codex exec --full-auto --ephemeral 'Implement the plan in .eden/trial/plan.md'"
+# In headless mode Claude prompts before file edits unless an explicit
+# permission mode is selected. `acceptEdits` lets the implementer update
+# model.py non-interactively while still prompting before side-effectful
+# commands.
+implement_command: "claude -p --permission-mode acceptEdits 'Implement the plan in .eden/trial/plan.md'"
 plan_command: "python3 plan.py"
 max_trials: 15
 max_wall_time: "30m"

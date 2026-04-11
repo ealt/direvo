@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,14 +29,21 @@ class BootstrapResult:
 
 
 def _ensure_symlink(source: Path, target: Path) -> None:
-    """Create or refresh a symlink to a known source path."""
+    """Create or refresh a symlink to a known source path.
+
+    Replaces stale regular files or directories at the target (common when
+    Docker COPY flattens symlinks from a previous local run into real files).
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.is_symlink():
         if target.resolve() == source.resolve():
             return
         target.unlink()
     elif target.exists():
-        raise RuntimeError(f"Cannot create symlink over existing path: {target}")
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
     target.symlink_to(source)
 
 

@@ -107,6 +107,60 @@ def test_bootstrap_initializes_databases(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert result.config.proposals_db.exists()
 
 
+def test_bootstrap_replaces_stale_file_with_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Docker COPY flattens symlinks into regular files; bootstrap must replace them."""
+    from eden.bootstrap import bootstrap
+
+    experiment_root, _workspace = _init_experiment(tmp_path)
+    config_path = _write_config(experiment_root)
+
+    class FakeRuntimeSetup:
+        def prepare(self, config: object) -> None:
+            pass
+
+    monkeypatch.setattr("eden.bootstrap.RuntimeSetup", FakeRuntimeSetup)
+
+    # Simulate Docker COPY: create a regular file where the symlink should go.
+    planner_eden = experiment_root / "planner" / ".eden"
+    planner_eden.mkdir(parents=True, exist_ok=True)
+    stale_file = planner_eden / "results.db"
+    stale_file.write_text("stale copy from docker", encoding="utf-8")
+    assert stale_file.is_file() and not stale_file.is_symlink()
+
+    result = bootstrap(config_path, progress=False)
+
+    # Should now be a symlink pointing to the canonical results.db.
+    assert (planner_eden / "results.db").is_symlink()
+    assert (planner_eden / "results.db").resolve() == result.config.results_db.resolve()
+
+
+def test_bootstrap_replaces_stale_directory_with_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Docker COPY flattens a directory symlink into a real directory."""
+    from eden.bootstrap import bootstrap
+
+    experiment_root, _workspace = _init_experiment(tmp_path)
+    config_path = _write_config(experiment_root)
+
+    class FakeRuntimeSetup:
+        def prepare(self, config: object) -> None:
+            pass
+
+    monkeypatch.setattr("eden.bootstrap.RuntimeSetup", FakeRuntimeSetup)
+
+    # Simulate Docker COPY: create a real directory where the artifacts symlink should go.
+    planner_eden = experiment_root / "planner" / ".eden"
+    planner_eden.mkdir(parents=True, exist_ok=True)
+    stale_dir = planner_eden / "artifacts"
+    stale_dir.mkdir()
+    (stale_dir / "old_trial.txt").write_text("stale", encoding="utf-8")
+    assert stale_dir.is_dir() and not stale_dir.is_symlink()
+
+    result = bootstrap(config_path, progress=False)
+
+    assert (planner_eden / "artifacts").is_symlink()
+    assert (planner_eden / "artifacts").resolve() == result.config.artifacts_dir.resolve()
+
+
 def test_bootstrap_rejects_non_git_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     experiment_root = tmp_path / "experiment"
     planner_root = experiment_root / "planner"

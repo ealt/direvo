@@ -9,7 +9,7 @@ Unix user isolation.
 
 ```bash
 # From the repo root:
-uv sync --dev
+uv sync --extra dev
 uv run eden docker run --config example/data-fitting/.eden/config.yaml --output ./output
 ```
 
@@ -21,6 +21,32 @@ The `eden docker` command reads the config's `docker:` section, generates a
 Dockerfile (installs eden + both CLIs, initializes the workspace git repo,
 copies the experiment), builds the image, and runs it with `--privileged` for
 user isolation.
+
+## Running Locally
+
+`uv run eden run --config example/data-fitting/.eden/config.yaml` can work on
+the host, but it needs extra setup that `eden docker run` handles for you:
+
+```bash
+uv sync --extra dev
+cd example/data-fitting/planner/workspace
+git init
+git add .
+git commit -m "initial"
+cd ../../..
+uv run eden run --config example/data-fitting/.eden/config.yaml
+```
+
+Important local-only caveats:
+
+- `planner/workspace/` is committed as plain files, not as an initialized git
+  repo. `eden run` needs the manual `git init` above.
+- The demo's `docker.pip_dependencies` only apply to `eden docker run`. For a
+  host `eden run`, whichever interpreter `python3` resolves to must already
+  have `numpy` installed, or evaluation will fail with
+  `ModuleNotFoundError: No module named 'numpy'`.
+- The example uses `claude -p --permission-mode acceptEdits` so the headless
+  implementer can write `model.py` without stalling on edit approval prompts.
 
 ## Prerequisites
 
