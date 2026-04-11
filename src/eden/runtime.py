@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shutil
 import subprocess
@@ -187,10 +188,8 @@ class RuntimeSetup:
         claude_json = auth_base / ".claude.json"
         if claude_json.is_file():
             target = user_root / "home" / ".claude.json"
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 shutil.copy2(claude_json, target)
-            except FileNotFoundError:
-                pass
 
     @staticmethod
     def _claude_auth_destinations(user_root: Path) -> list[Path]:

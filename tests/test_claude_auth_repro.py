@@ -8,16 +8,14 @@ to look.  A mismatch between these two modules is the root cause of the
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from eden.config import load_config
-from eden.execution import ImplementationManager, ImplementationResult
+from eden.execution import ImplementationManager
 from eden.runtime import RuntimeSetup, SystemRunner
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -282,10 +280,10 @@ class TestEvalPipeline:
     without needing Claude CLI or Docker.
     """
 
-    @pytest.fixture()
+    @pytest.fixture
     def workspace(self, tmp_path: Path) -> Path:
         """Set up a minimal workspace with the data-fitting eval harness."""
-        numpy = pytest.importorskip("numpy")
+        pytest.importorskip("numpy")
 
         # Copy eval data from the example.
         example_root = Path(__file__).resolve().parent.parent / "example" / "data-fitting"
@@ -303,8 +301,6 @@ class TestEvalPipeline:
 
     def test_baseline_model_evaluates_successfully(self, workspace: Path, tmp_path: Path) -> None:
         """The baseline predict (mean) should evaluate without error."""
-        import numpy as np
-
         # Write the baseline model.
         (workspace / "model.py").write_text(
             "import numpy as np\n"
@@ -364,4 +360,6 @@ class TestEvalPipeline:
             timeout=30,
         )
         # eval.py exits 1 on shape mismatch
-        assert result.returncode != 0, f"Expected shape-mismatch error:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert result.returncode != 0, (
+            f"Expected shape-mismatch error:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )

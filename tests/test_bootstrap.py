@@ -125,7 +125,8 @@ def test_bootstrap_replaces_stale_file_with_symlink(monkeypatch: pytest.MonkeyPa
     planner_eden.mkdir(parents=True, exist_ok=True)
     stale_file = planner_eden / "results.db"
     stale_file.write_text("stale copy from docker", encoding="utf-8")
-    assert stale_file.is_file() and not stale_file.is_symlink()
+    assert stale_file.is_file()
+    assert not stale_file.is_symlink()
 
     result = bootstrap(config_path, progress=False)
 
@@ -153,7 +154,8 @@ def test_bootstrap_replaces_stale_directory_with_symlink(monkeypatch: pytest.Mon
     stale_dir = planner_eden / "artifacts"
     stale_dir.mkdir()
     (stale_dir / "old_trial.txt").write_text("stale", encoding="utf-8")
-    assert stale_dir.is_dir() and not stale_dir.is_symlink()
+    assert stale_dir.is_dir()
+    assert not stale_dir.is_symlink()
 
     result = bootstrap(config_path, progress=False)
 

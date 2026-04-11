@@ -10,24 +10,17 @@ Run with:  uv run -m pytest tests/test_docker_lifecycle.py -v
 
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
-
-import pytest
 
 from eden.config import load_config
 from eden.db import DatabaseManager
 from eden.execution import EvaluationResult, ImplementationManager, ImplementationResult
-from eden.git_manager import GitManager
-from eden.logging import configure_logging
-from eden.models import ProposalStatus, SessionConfig
+from eden.models import ProposalStatus
 from eden.orchestrator import Orchestrator
 from eden.planner import PlannerSession
-
 
 # ---------------------------------------------------------------------------
 # Test doubles (same patterns as test_orchestrator.py)
@@ -226,8 +219,7 @@ class TestDockerContextCleanup:
 
     def test_stale_worktrees_removed_from_docker_context(self, tmp_path: Path) -> None:
         experiment_root, workspace = _init_experiment(tmp_path)
-        config_path = _write_config(experiment_root)
-        config = load_config(config_path)
+        _write_config(experiment_root)
 
         # Create a stale worktree.
         worktree_dir = workspace / "worktrees" / "wt-0"
