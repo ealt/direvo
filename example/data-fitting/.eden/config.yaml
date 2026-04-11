@@ -19,6 +19,8 @@ objective:
   expr: "r_squared"
   direction: "maximize"
 file_permissions:
+  - path: "plan.py"
+    grant: "planner"
   - path: "train.npz"
     grant: "implementer"
 docker:
