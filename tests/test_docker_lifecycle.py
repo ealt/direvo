@@ -81,6 +81,15 @@ class FakeImplementationManager(ImplementationManager):
         )
 
 
+class EvalCrashImplementationManager(FakeImplementationManager):
+    """Implementation succeeds but evaluation raises, triggering _recover_trial after commit."""
+
+    def run_evaluation(
+        self, *, worktree_path: Path, evaluate_command: str, timeout_sec: int, user: str | None = None
+    ) -> EvaluationResult:
+        raise RuntimeError("simulated eval crash")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -303,6 +312,43 @@ class TestInvalidParentCommit:
         trial_row = db.get_trial_row(1)
         assert trial_row is not None
         assert trial_row["status"] == "success"
+
+
+class TestRecoveryAfterCommittedTrial:
+    """Recovery must not fail when .eden/trial/ files were already committed."""
+
+    def test_recovery_after_eval_crash_does_not_fail_on_clean_status(self, tmp_path: Path) -> None:
+        """Reproduce: implementation commits .eden/trial/notes.md and plan.md,
+        then evaluation crashes.  _recover_trial must leave the worktree clean.
+
+        Before the fix, clean_trial_docs deleted committed files, causing
+        require_clean_status to fail with:
+            D .eden/trial/notes.md
+             D .eden/trial/plan.md
+        """
+        experiment_root, workspace = _init_experiment(tmp_path)
+        config_path = _write_config(experiment_root, max_trials=1)
+
+        from eden.bootstrap import bootstrap
+
+        result = bootstrap(str(config_path), progress=False)
+        db = result.database_manager
+        head = _head_sha(workspace)
+        _seed_proposals(db, head, count=1)
+
+        orchestrator = Orchestrator(
+            result.config,
+            db,
+            result.logger,
+            execution_manager=EvalCrashImplementationManager(),
+            planner_session=FakePlannerSession(),
+        )
+        # This used to raise RuntimeError("Worktree is not clean after recovery")
+        orchestrator.run()
+
+        trial = db.get_trial_row(1)
+        assert trial is not None
+        assert trial["status"] == "error"
 
 
 class TestFullDockerLifecycle:

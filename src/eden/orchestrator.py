@@ -443,7 +443,6 @@ class Orchestrator:
         self.git_manager.abort_in_progress_git_state(worktree_path)
         self.git_manager.reset_hard(worktree_path)
         self.git_manager.clean_untracked(worktree_path)
-        clean_trial_docs(worktree_path)
         self.git_manager.require_clean_status(worktree_path)
         secure_worktree_root(worktree_path, f"trial-{slot}")
         secure_worktree_git_metadata(self.config.workspace_root, slot, f"trial-{slot}")
