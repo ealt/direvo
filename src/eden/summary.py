@@ -27,7 +27,8 @@ def print_summary(orchestrator: Orchestrator) -> None:
 
 def render_summary(orchestrator: Orchestrator) -> str:
     """Render a human-readable session summary."""
-    trials = orchestrator.database_manager.list_trials()
+    session_trial_ids = _session_trial_ids(orchestrator)
+    trials = orchestrator.database_manager.list_trials(trial_ids=session_trial_ids)
     status_counts = Counter(str(row["status"]) for row in trials)
     counts = _format_status_counts(status_counts)
 
@@ -42,6 +43,7 @@ def render_summary(orchestrator: Orchestrator) -> str:
     best_trial = orchestrator.database_manager.best_trial(
         orchestrator.config.objective.expr,
         orchestrator.config.objective.direction,
+        trial_ids=session_trial_ids,
     )
     if best_trial is None:
         lines.append("")
@@ -106,3 +108,11 @@ def _slug_from_branch(branch: object) -> str:
     if not isinstance(branch, str) or "-" not in branch:
         return ""
     return branch.split("-", 1)[1]
+
+
+def _session_trial_ids(orchestrator: Orchestrator) -> list[int] | None:
+    """Return the current session's trial IDs when the orchestrator tracks them."""
+    trial_ids = getattr(orchestrator, "session_trial_ids", None)
+    if not trial_ids:
+        return None
+    return [int(trial_id) for trial_id in trial_ids]

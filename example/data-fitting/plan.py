@@ -12,6 +12,7 @@ using Claude CLI to analyze results and suggest new approaches.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from eden.planner_kit import ClaudeSession, PlannerContext, Proposal, run_planner
@@ -128,11 +129,38 @@ def _make_initial_proposals(ctx: PlannerContext) -> list[Proposal]:
     ]
 
 
+def _current_session_trials(ctx: PlannerContext, trials: list[dict]) -> list[dict]:
+    """Return only trials whose commits are reachable from this session's HEAD."""
+    return [trial for trial in trials if _commit_is_reachable(ctx.workspace, ctx.head_sha, trial.get("commit_sha"))]
+
+
+def _commit_is_reachable(workspace: str, head_sha: str, commit_sha: object) -> bool:
+    """Return whether a commit exists in the workspace and descends from HEAD."""
+    if not isinstance(commit_sha, str) or not commit_sha.strip():
+        return False
+    exists = subprocess.run(
+        ["git", "-C", workspace, "cat-file", "-e", f"{commit_sha}^{{commit}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if exists.returncode != 0:
+        return False
+    relation = subprocess.run(
+        ["git", "-C", workspace, "merge-base", "--is-ancestor", head_sha, commit_sha],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return relation.returncode == 0
+
+
 def _make_reactive_proposal(ctx: PlannerContext, proposal_index: int, trial: dict) -> Proposal:
     all_trials = ctx.get_all_trials(order_by="r_squared DESC")
-    history = format_history(ctx, all_trials)
-    best = all_trials[0] if all_trials else None
-    parent_sha = best["commit_sha"] if best else ctx.head_sha
+    session_trials = _current_session_trials(ctx, all_trials)
+    history = format_history(ctx, session_trials)
+    best = session_trials[0] if session_trials else None
+    parent_sha = best["commit_sha"] if best else str(trial.get("commit_sha") or ctx.head_sha)
 
     prompt = (
         f"Latest trial results (sorted by R²):\n{history}\n\n"

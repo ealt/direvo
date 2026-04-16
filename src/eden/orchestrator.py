@@ -68,6 +68,7 @@ class Orchestrator:
         )
         self.idle_poll_interval_sec = idle_poll_interval_sec
         self._stop_requested = threading.Event()
+        self.session_trial_ids: list[int] = []
         self.last_termination_reason: str | None = None
         self.wall_time_seconds = 0.0
 
@@ -268,6 +269,7 @@ class Orchestrator:
 
     def _run_claimed_trial(self, *, slot: int, proposal: ValidatedProposal) -> None:
         trial_id = self.database_manager.reserve_trial_id()
+        self.session_trial_ids.append(trial_id)
         branch_name = f"trial/{trial_id}-{proposal.slug}"
         description = f"trial/{trial_id}-{proposal.slug}"
         log_event(

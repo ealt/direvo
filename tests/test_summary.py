@@ -91,3 +91,48 @@ def test_render_summary_handles_no_successful_trials(tmp_path: Path) -> None:
     assert "Trials:   0 success | 1 eval_error | 1 error" in rendered
     assert "No successful trials" in rendered
     assert "Best trial:" not in rendered
+
+
+def test_render_summary_scopes_counts_and_best_trial_to_current_session(tmp_path: Path) -> None:
+    metrics_schema = {"score": "real"}
+    manager = _manager(tmp_path, metrics_schema)
+    old_success = manager.reserve_trial_id()
+    old_error = manager.reserve_trial_id()
+    current_success = manager.reserve_trial_id()
+    current_error = manager.reserve_trial_id()
+
+    manager.update_trial(
+        TrialUpdate(
+            trial_id=old_success,
+            status=TrialStatus.SUCCESS,
+            branch="trial/1-old-best",
+            metrics={"score": 0.99},
+        )
+    )
+    manager.update_trial(TrialUpdate(trial_id=old_error, status=TrialStatus.EVAL_ERROR))
+    manager.update_trial(
+        TrialUpdate(
+            trial_id=current_success,
+            status=TrialStatus.SUCCESS,
+            branch="trial/3-current",
+            metrics={"score": 0.5},
+        )
+    )
+    manager.update_trial(TrialUpdate(trial_id=current_error, status=TrialStatus.ERROR))
+
+    orchestrator = SimpleNamespace(
+        database_manager=manager,
+        config=SimpleNamespace(
+            objective=ObjectiveSpec(expr="score", direction=ObjectiveDirection.MAXIMIZE),
+            metrics_schema=metrics_schema,
+        ),
+        session_trial_ids=[current_success, current_error],
+        last_termination_reason="queue_empty",
+        wall_time_seconds=3.0,
+    )
+
+    rendered = render_summary(cast(Any, orchestrator))
+
+    assert "Trials:   1 success | 1 error" in rendered
+    assert "Best trial: #3 (current)" in rendered
+    assert "Best trial: #1" not in rendered

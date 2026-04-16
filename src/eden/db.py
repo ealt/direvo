@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import resources
@@ -121,24 +121,46 @@ class DatabaseManager:
                 raise DatabaseError("Failed to create proposal.")
             return int(cursor.lastrowid)
 
-    def list_trials(self) -> list[sqlite3.Row]:
-        """Return all trials ordered by id."""
+    def list_trials(self, *, trial_ids: Iterable[int] | None = None) -> list[sqlite3.Row]:
+        """Return trials ordered by id, optionally restricted to specific IDs."""
+        ids = self._normalized_trial_ids(trial_ids)
+        if ids == []:
+            return []
+        query = "SELECT * FROM trials"
+        params: list[object] = []
+        if ids is not None:
+            placeholders = ", ".join("?" for _ in ids)
+            query += f" WHERE trial_id IN ({placeholders})"
+            params.extend(ids)
+        query += " ORDER BY trial_id ASC"
         with self._connection(self.results_db, self.results_journal_mode) as conn:
-            return list(conn.execute("SELECT * FROM trials ORDER BY trial_id ASC"))
+            return list(conn.execute(query, params))
 
-    def best_trial(self, expression: str, direction: ObjectiveDirection) -> sqlite3.Row | None:
+    def best_trial(
+        self, expression: str, direction: ObjectiveDirection, *, trial_ids: Iterable[int] | None = None
+    ) -> sqlite3.Row | None:
         """Return the best successful trial for an objective expression."""
         order = "DESC" if direction == ObjectiveDirection.MAXIMIZE else "ASC"
+        ids = self._normalized_trial_ids(trial_ids)
+        if ids == []:
+            return None
+        trial_filter = ""
+        params: list[object] = [TrialStatus.SUCCESS.value]
+        if ids is not None:
+            placeholders = ", ".join("?" for _ in ids)
+            trial_filter = f" AND trial_id IN ({placeholders})"
+            params.extend(ids)
         query = f"""
             SELECT *
             FROM trials
             WHERE status = ?
               AND ({expression}) IS NOT NULL
+              {trial_filter}
             ORDER BY ({expression}) {order}, trial_id ASC
             LIMIT 1
         """
         with self._connection(self.results_db, self.results_journal_mode) as conn:
-            return conn.execute(query, (TrialStatus.SUCCESS.value,)).fetchone()
+            return conn.execute(query, params).fetchone()
 
     def update_proposal_status(
         self, proposal_id: int, status: ProposalStatus, *, priority: float | None = None
@@ -237,3 +259,10 @@ class DatabaseManager:
     def _read_sql(self, name: str) -> str:
         """Read a packaged SQL file."""
         return resources.files("eden.sql").joinpath(name).read_text(encoding="utf-8")
+
+    @staticmethod
+    def _normalized_trial_ids(trial_ids: Iterable[int] | None) -> list[int] | None:
+        """Normalize an optional trial-id filter to a concrete list."""
+        if trial_ids is None:
+            return None
+        return [int(trial_id) for trial_id in trial_ids]

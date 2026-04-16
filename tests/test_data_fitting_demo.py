@@ -199,7 +199,11 @@ class TestDataFittingPlanner:
             mock_generate = mock.patch.object(
                 planner_mod.session, "generate", return_value="Try polynomial degree 7"
             )
-            with mock.patch.object(ctx, "get_all_trials", return_value=all_trials), mock_generate as gen_mock:
+            with (
+                mock.patch.object(ctx, "get_all_trials", return_value=all_trials),
+                mock.patch.object(planner_mod, "_current_session_trials", return_value=all_trials),
+                mock_generate as gen_mock,
+            ):
                 proposal = planner_mod._make_reactive_proposal(ctx, 5, trial)
 
             assert proposal.slug == "strategy-5-t1"
@@ -214,12 +218,77 @@ class TestDataFittingPlanner:
             assert "Implemented basic linear fit" in prompt_arg
 
             # Test fallback when session.generate returns None
-            with mock.patch.object(ctx, "get_all_trials", return_value=all_trials), mock.patch.object(
-                planner_mod.session, "generate", return_value=None
+            with (
+                mock.patch.object(ctx, "get_all_trials", return_value=all_trials),
+                mock.patch.object(planner_mod, "_current_session_trials", return_value=all_trials),
+                mock.patch.object(planner_mod.session, "generate", return_value=None),
             ):
                 proposal = planner_mod._make_reactive_proposal(ctx, 6, trial)
 
             assert "Improve on the best approach" in proposal.plan_text
+        finally:
+            sys.path.pop(0)
+            if "plan" in sys.modules:
+                del sys.modules["plan"]
+
+    def test_reactive_proposal_ignores_stale_trials_from_previous_sessions(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest import mock
+
+        from eden.planner_kit import PlannerContext, configure_logging
+
+        artifacts = tmp_path / "artifacts" / "trial-1"
+        artifacts.mkdir(parents=True)
+        (artifacts / "notes.md").write_text("Implemented current-session fit\n")
+
+        ctx = PlannerContext(
+            head_sha="abc123",
+            parallel_trials=3,
+            results_db=str(tmp_path / "results.db"),
+            proposals_db=str(tmp_path / "proposals.db"),
+            proposals_dir=str(tmp_path / "proposals"),
+            artifacts_dir=str(tmp_path / "artifacts"),
+            workspace=str(tmp_path / "workspace"),
+            logger=configure_logging("test_df_planner"),
+        )
+
+        stale_trial = {
+            "trial_id": 99,
+            "commit_sha": "stale-sha",
+            "r_squared": 0.99,
+            "rmse": 0.01,
+            "status": "success",
+        }
+        current_trial = {
+            "trial_id": 1,
+            "commit_sha": "sha1",
+            "r_squared": 0.85,
+            "rmse": 1.5,
+            "status": "success",
+        }
+
+        sys.path.insert(0, str(DEMO_DIR))
+        try:
+            import importlib
+
+            import plan as planner_mod  # type: ignore[import-not-found]
+
+            importlib.reload(planner_mod)
+
+            with (
+                mock.patch.object(ctx, "get_all_trials", return_value=[stale_trial, current_trial]),
+                mock.patch.object(planner_mod, "_current_session_trials", return_value=[current_trial]),
+                mock.patch.object(
+                    planner_mod.session, "generate", return_value="Try current-session refinement"
+                ) as gen_mock,
+            ):
+                proposal = planner_mod._make_reactive_proposal(ctx, 5, current_trial)
+
+            assert proposal.parent_commits == ["sha1"]
+            prompt_arg = gen_mock.call_args[0][0]
+            assert "Trial 1" in prompt_arg
+            assert "Trial 99" not in prompt_arg
         finally:
             sys.path.pop(0)
             if "plan" in sys.modules:
